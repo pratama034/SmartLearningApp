@@ -1,0 +1,267 @@
+import type {
+  FocusSession,
+  GroupMember,
+  NotificationEvent,
+  StudyBlock,
+  StudyGroup,
+  User,
+} from '../types'
+
+export const mockUsers = [
+  {
+    id: 'user-uuid-001',
+    email: 'demo@kampus.id',
+    password: 'password123',
+    name: 'Mahasiswa Demo',
+    role: 'mahasiswa',
+    program_studi: 'Ilmu Komputer',
+    timezone: 'Asia/Jakarta',
+    tenant_id: 'kampus-demo',
+  },
+] satisfies (User & { password: string })[]
+
+export const mockStudyBlocks = [
+  {
+    id: 'block-001',
+    user_id: 'user-001',
+    type: 'Jadwal kuliah',
+    title: 'Interaksi Manusia dan Komputer',
+    description: 'Kuliah tatap muka, Gedung Fasilkom ruang 2.04.',
+    start_time: '09:00',
+    end_time: '11:30',
+    recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO',
+    date: '2026-10-26',
+    auto_focus: false,
+    co_focus_enabled: false,
+  },
+  {
+    id: 'block-002',
+    user_id: 'user-001',
+    type: 'Belajar mandiri',
+    title: 'Menyelesaikan prototipe aplikasi',
+    description: 'Fokus menyusun alur onboarding dan menguji desain di Figma.',
+    start_time: '13:00',
+    end_time: '15:00',
+    recurrence_rule: null,
+    date: '2026-10-21',
+    auto_focus: true,
+    co_focus_enabled: false,
+  },
+  {
+    id: 'block-003',
+    user_id: 'user-001',
+    type: 'Kerja kelompok',
+    title: 'Sprint tugas Rekayasa Perangkat Lunak',
+    description: 'Membagi tugas, meninjau pull request, dan menyiapkan demo.',
+    start_time: '16:00',
+    end_time: '17:30',
+    recurrence_rule: null,
+    date: '2026-10-21',
+    auto_focus: true,
+    co_focus_enabled: true,
+  },
+  {
+    id: 'block-004',
+    user_id: 'user-002',
+    type: 'Persiapan ujian',
+    title: 'Latihan soal Struktur Data',
+    description: 'Mengulang tree, graph, dan kompleksitas algoritma menjelang UTS.',
+    start_time: '19:00',
+    end_time: '20:30',
+    recurrence_rule: null,
+    date: '2026-10-22',
+    auto_focus: true,
+    co_focus_enabled: true,
+  },
+  {
+    id: 'block-005',
+    user_id: 'user-003',
+    type: 'Jadwal kuliah',
+    title: 'Basis Data Lanjut',
+    description: 'Praktikum normalisasi dan optimasi query SQL.',
+    start_time: '10:00',
+    end_time: '12:00',
+    recurrence_rule: 'FREQ=WEEKLY;BYDAY=WE',
+    date: '2026-10-28',
+    auto_focus: false,
+    co_focus_enabled: false,
+  },
+  {
+    id: 'block-006',
+    user_id: 'user-004',
+    type: 'Belajar mandiri',
+    title: 'Membaca materi Sistem Kendali',
+    description: 'Membuat rangkuman bab respons frekuensi dan mengerjakan kuis.',
+    start_time: '08:30',
+    end_time: '10:00',
+    recurrence_rule: null,
+    date: '2026-10-23',
+    auto_focus: true,
+    co_focus_enabled: false,
+  },
+] satisfies StudyBlock[]
+
+export const mockSessions = [
+  {
+    id: 'session-001',
+    block_id: 'block-002',
+    user_id: 'user-001',
+    started_at: '2026-10-21T13:02:00+07:00',
+    ended_at: '2026-10-21T13:52:00+07:00',
+    status: 'completed',
+    ended_by: 'user',
+  },
+  {
+    id: 'session-002',
+    block_id: 'block-003',
+    user_id: 'user-001',
+    started_at: '2026-10-21T16:04:00+07:00',
+    ended_at: null,
+    status: 'active',
+    ended_by: null,
+  },
+  {
+    id: 'session-003',
+    block_id: 'block-004',
+    user_id: 'user-002',
+    started_at: '2026-10-20T19:05:00+07:00',
+    ended_at: '2026-10-20T19:22:00+07:00',
+    status: 'paused',
+    ended_by: null,
+  },
+  {
+    id: 'session-004',
+    block_id: 'block-006',
+    user_id: 'user-004',
+    started_at: '2026-10-20T08:31:00+07:00',
+    ended_at: '2026-10-20T09:25:00+07:00',
+    status: 'completed',
+    ended_by: 'system',
+  },
+] satisfies FocusSession[]
+
+export const mockNotifications = [
+  {
+    id: 'notification-001',
+    session_id: 'session-001',
+    source_id: 'whatsapp',
+    text: 'Grup RPL: jadwal konsultasi digeser ke pukul 15.00.',
+    received_at: '2026-10-21T13:18:24+07:00',
+    passed: false,
+    handled: true,
+  },
+  {
+    id: 'notification-002',
+    session_id: 'session-001',
+    source_id: 'instagram',
+    text: 'Akun yang Anda ikuti membagikan cerita baru.',
+    received_at: '2026-10-21T13:31:09+07:00',
+    passed: false,
+    handled: false,
+  },
+  {
+    id: 'notification-003',
+    session_id: 'session-002',
+    source_id: 'whatsapp',
+    text: 'Nabila: aku sudah review PR autentikasi, ada catatan di validasi form.',
+    received_at: '2026-10-21T16:22:41+07:00',
+    passed: true,
+    handled: true,
+  },
+  {
+    id: 'notification-004',
+    session_id: 'session-002',
+    source_id: 'email',
+    text: 'Pengingat: pengumpulan laporan praktikum berakhir besok pukul 23.59.',
+    received_at: '2026-10-21T16:37:12+07:00',
+    passed: true,
+    handled: false,
+  },
+  {
+    id: 'notification-005',
+    session_id: 'session-003',
+    source_id: 'telegram',
+    text: 'Bima: ada yang mau ikut belajar bareng di perpustakaan besok?',
+    received_at: '2026-10-20T19:14:03+07:00',
+    passed: false,
+    handled: true,
+  },
+] satisfies NotificationEvent[]
+
+export const mockStudyGroups = [
+  {
+    id: 'group-001',
+    name: 'Tim Proyek Fokus',
+    description: 'Kelompok proyek mata kuliah Rekayasa Perangkat Lunak.',
+    owner_id: 'user-001',
+    created_at: '2026-09-15T10:00:00+07:00',
+  },
+  {
+    id: 'group-002',
+    name: 'Teman Belajar UTS Struktur Data',
+    description: 'Belajar bareng dan saling membahas latihan soal UTS.',
+    owner_id: 'user-002',
+    created_at: '2026-10-01T14:30:00+07:00',
+  },
+] satisfies StudyGroup[]
+
+export const mockGroupMembers = [
+  {
+    id: 'member-001',
+    group_id: 'group-001',
+    user_id: 'user-001',
+    role: 'owner',
+    joined_at: '2026-09-15T10:00:00+07:00',
+  },
+  {
+    id: 'member-002',
+    group_id: 'group-001',
+    user_id: 'user-002',
+    role: 'member',
+    joined_at: '2026-09-16T11:20:00+07:00',
+  },
+  {
+    id: 'member-003',
+    group_id: 'group-001',
+    user_id: 'user-003',
+    role: 'member',
+    joined_at: '2026-09-17T09:10:00+07:00',
+  },
+  {
+    id: 'member-004',
+    group_id: 'group-002',
+    user_id: 'user-002',
+    role: 'owner',
+    joined_at: '2026-10-01T14:30:00+07:00',
+  },
+  {
+    id: 'member-005',
+    group_id: 'group-002',
+    user_id: 'user-004',
+    role: 'member',
+    joined_at: '2026-10-02T08:45:00+07:00',
+  },
+] satisfies GroupMember[]
+
+export const mockCoFocusMembers = [
+  { name: 'Alya Pratama', avatar: 'AP', status: 'Sedang Fokus' },
+  { name: 'Budi Santoso', avatar: 'BS', status: 'Istirahat' },
+  { name: 'Citra Lestari', avatar: 'CL', status: 'Tersedia' },
+  { name: 'Dimas Ramadhan', avatar: 'DR', status: 'Sedang Fokus' },
+] as const
+
+export const mockReportData = [
+  { day: 'Senin', focusMinutes: 95 },
+  { day: 'Selasa', focusMinutes: 130 },
+  { day: 'Rabu', focusMinutes: 110 },
+  { day: 'Kamis', focusMinutes: 160 },
+  { day: 'Jumat', focusMinutes: 195 },
+]
+
+export const mockCampusData = [
+  { day: 'Senin', focusMinutes: 78 },
+  { day: 'Selasa', focusMinutes: 92 },
+  { day: 'Rabu', focusMinutes: 86 },
+  { day: 'Kamis', focusMinutes: 105 },
+  { day: 'Jumat', focusMinutes: 114 },
+]
