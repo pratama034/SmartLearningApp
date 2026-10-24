@@ -12,9 +12,12 @@ import Reports from './pages/Reports'
 import Register from './pages/Register'
 import { supabase } from './lib/supabase'
 import { useAuthStore } from './store/authStore'
+import { useStudyStore } from './store/studyStore'
 
 export default function App() {
   const setSession = useAuthStore((state) => state.setSession)
+  const user = useAuthStore((state) => state.user)
+  const loadBlocks = useStudyStore((state) => state.loadBlocks)
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data, error }) => {
@@ -27,6 +30,10 @@ export default function App() {
 
     return () => subscription.unsubscribe()
   }, [setSession])
+
+  useEffect(() => {
+    if (user?.id) void loadBlocks(user.id)
+  }, [loadBlocks, user?.id])
 
   return (
     <BrowserRouter>

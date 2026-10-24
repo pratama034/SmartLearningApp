@@ -29,6 +29,7 @@ export default function StudyBlocks() {
   const blocks = useStudyStore((state) => state.blocks)
   const addBlock = useStudyStore((state) => state.addBlock)
   const deleteBlock = useStudyStore((state) => state.deleteBlock)
+  const syncError = useStudyStore((state) => state.syncError)
   const user = useAuthStore((state) => state.user)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -51,7 +52,7 @@ export default function StudyBlocks() {
       return
     }
 
-    addBlock({
+    void addBlock({
       id: crypto.randomUUID(),
       user_id: user?.id ?? 'user-uuid-001',
       title: validation.data.title,
@@ -96,6 +97,7 @@ export default function StudyBlocks() {
           <h2 id="study-block-list-title" className="text-[18px] font-bold leading-6 text-[#1F2C4F]">Jadwal tersimpan</h2>
           <span className="rounded-full bg-[#E1EAF8] px-2.5 py-1 text-[11px] font-semibold text-[#1D3668]">{blocks.length} jadwal</span>
         </div>
+        {syncError && <p role="status" className="mb-3 rounded-lg bg-[#FDEBC8] px-3 py-2 text-xs font-medium text-[#7A4B00]">{syncError}</p>}
 
         {blocks.length ? (
           <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
