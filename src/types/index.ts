@@ -3,12 +3,15 @@ export type UserRole = 'mahasiswa' | 'dosen' | 'admin'
 
 export interface User {
   id: string
-  email: string
   name: string
-  role: UserRole
-  program_studi: string
-  timezone: string
-  tenant_id: string
+  email: string
+  nim: string
+  major: string
+  university: string
+  role?: UserRole
+  program_studi?: string
+  timezone?: string
+  tenant_id?: string
 }
 
 export type StudyBlockType =
@@ -19,7 +22,7 @@ export type StudyBlockType =
 
 export interface StudyBlock {
   id: string
-  user_id: string
+  user_id?: string
   type: StudyBlockType
   title: string
   description: string

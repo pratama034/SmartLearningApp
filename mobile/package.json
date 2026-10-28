@@ -1,0 +1,31 @@
+{
+  "name": "smartlearning-android",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "start:dev-client": "expo start --dev-client",
+    "android": "expo run:android",
+    "prebuild": "expo prebuild",
+    "build:apk": "expo prebuild && cd android && gradlew.bat assembleRelease"
+  },
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  },
+  "dependencies": {
+    "expo": "~58.0.0",
+    "expo-dev-client": "~58.0.16",
+    "react": "19.3.0",
+    "react-native": "0.88.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

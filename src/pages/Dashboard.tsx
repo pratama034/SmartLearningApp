@@ -18,6 +18,7 @@ import {
   mockSessions,
   mockUsers,
 } from '../lib/mockData'
+import { useAuthStore } from '../store/authStore'
 import { useSessionStore, type FocusStatus } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
 import type { StudyBlock } from '../types'
@@ -215,6 +216,8 @@ function StudyBlockCard({
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const authUser = useAuthStore((state) => state.user)
+  const currentUser = authUser ?? mockUsers[0]
   const blocks = useStudyStore((state) => state.blocks)
   const activeBlock = useSessionStore((state) => state.activeBlock)
   const focusStatus = useSessionStore((state) => state.status)

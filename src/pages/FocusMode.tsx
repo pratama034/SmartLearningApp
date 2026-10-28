@@ -1,6 +1,7 @@
 import { Clock3, Pause, Play, Square } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getStudyDate } from '../data/mockData'
 import { useSessionStore } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
 
@@ -11,7 +12,7 @@ const mockIncomingNotifications = [
 ] as const
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10)
+  return getStudyDate()
 }
 
 function formatRemainingTime(seconds: number) {
@@ -33,6 +34,7 @@ export default function FocusMode() {
   const heldNotifications = useSessionStore((state) => state.heldNotifications)
   const addHeldNotification = useSessionStore((state) => state.addHeldNotification)
   const tick = useSessionStore((state) => state.tick)
+  const notificationCursor = useRef(0)
 
   useEffect(() => {
     if (status !== 'running') return
@@ -57,10 +59,11 @@ export default function FocusMode() {
     if (status !== 'running') return
 
     const intervalId = window.setInterval(() => {
-      const text = mockIncomingNotifications[Math.floor(Math.random() * mockIncomingNotifications.length)]
+      const text = mockIncomingNotifications[notificationCursor.current % mockIncomingNotifications.length]
+      notificationCursor.current += 1
       if (!text.includes('Email')) {
         addHeldNotification({
-          id: crypto.randomUUID(),
+          id: globalThis.crypto?.randomUUID?.() ?? `held-${Date.now()}-${notificationCursor.current}`,
           text,
           receivedAt: new Date().toISOString(),
         })

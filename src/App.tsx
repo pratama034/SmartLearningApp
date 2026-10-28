@@ -6,10 +6,12 @@ import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import FocusMode from './pages/FocusMode'
 import CoFocus from './pages/CoFocus'
+import Reports from './pages/Reports'
+import StudyGroupRoom from './components/group/StudyGroupRoom'
 import SessionSummary from './pages/SessionSummary'
 import StudyBlocks from './pages/StudyBlocks'
-import Reports from './pages/Reports'
 import Register from './pages/Register'
+import Settings from './pages/Settings'
 import { supabase } from './lib/supabase'
 import { useAuthStore } from './store/authStore'
 import { useStudyStore } from './store/studyStore'
@@ -17,7 +19,7 @@ import { useStudyStore } from './store/studyStore'
 export default function App() {
   const setSession = useAuthStore((state) => state.setSession)
   const user = useAuthStore((state) => state.user)
-  const loadBlocks = useStudyStore((state) => state.loadBlocks)
+  const fetchBlocks = useStudyStore((state) => state.fetchBlocks)
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data, error }) => {
@@ -32,8 +34,8 @@ export default function App() {
   }, [setSession])
 
   useEffect(() => {
-    if (user?.id) void loadBlocks(user.id)
-  }, [loadBlocks, user?.id])
+    if (user?.id) void fetchBlocks(user.id)
+  }, [fetchBlocks, user?.id])
 
   return (
     <BrowserRouter>
@@ -46,10 +48,12 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="study-blocks" element={<StudyBlocks />} />
             <Route path="focus" element={<FocusMode />} />
-            <Route path="cofocus" element={<CoFocus />} />
+          <Route path="cofocus" element={<CoFocus />} />
+          <Route path="cofocus/room" element={<StudyGroupRoom />} />
             <Route path="summary" element={<SessionSummary />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/login" replace />} />

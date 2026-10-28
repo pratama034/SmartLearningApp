@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "f9491dcd-55fe-4e05-baaf-de7462983faf"
+      }
+    },
+    "android": {
+      "package": "com.pratamaa.smartlearningapp"
+    }
+  }
+}

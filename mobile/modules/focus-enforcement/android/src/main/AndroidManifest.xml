@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <service
+      android:name="com.smartlearning.focus.FocusAccessibilityService"
+      android:label="SmartLearning Focus Lock"
+      android:description="@string/focus_accessibility_description"
+      android:exported="false"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/focus_accessibility_config" />
+    </service>
+    <service
+      android:name="com.smartlearning.focus.FocusNotificationListener"
+      android:label="SmartLearning Notification Hold"
+      android:exported="false"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

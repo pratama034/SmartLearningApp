@@ -2,17 +2,17 @@ import {
   BarChart3,
   BookOpen,
   LayoutDashboard,
+  LogOut,
   Settings,
   Timer,
   UserRound,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { mockUsers } from '../lib/mockData'
+import { useAuthStore } from '../store/authStore'
 import { useSessionStore } from '../store/sessionStore'
-
-const currentUser = mockUsers[0]
 
 const navigation: { label: string; to: string; icon: LucideIcon }[] = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
@@ -20,6 +20,7 @@ const navigation: { label: string; to: string; icon: LucideIcon }[] = [
   { label: 'Fokus', to: '/focus', icon: Timer },
   { label: 'Co-focus', to: '/cofocus', icon: UsersRound },
   { label: 'Laporan', to: '/reports', icon: BarChart3 },
+  { label: 'Pengaturan', to: '/settings', icon: Settings },
 ]
 
 function NavigationItems({ mobile = false }: { mobile?: boolean }) {
@@ -30,7 +31,7 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
   return (
     <nav
       aria-label="Navigasi utama"
-      className={mobile ? 'flex h-16 items-center justify-around px-2' : 'space-y-1.5'}
+      className={mobile ? 'flex h-16 items-center justify-around px-1' : 'space-y-1.5'}
     >
       {navigation.map(({ label, to, icon: Icon }) => {
         const isFocus = to === '/focus'
@@ -43,7 +44,7 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
             className={({ isActive }) => [
               'group relative flex items-center transition-colors duration-150',
               mobile
-                ? 'min-h-12 min-w-[56px] flex-col justify-center gap-0.5 rounded-xl px-1 text-[11px] font-semibold'
+                ? 'min-h-12 min-w-[44px] flex-col justify-center gap-0.5 rounded-xl px-1 text-[10px] font-semibold'
                 : 'gap-3 rounded-xl px-3 py-3 text-sm font-semibold',
               isActive
                 ? 'text-[#1D3668]'
@@ -95,11 +96,20 @@ function Brand() {
 }
 
 export default function Layout() {
+  const navigate = useNavigate()
+  const storeUser = useAuthStore((state) => state.user)
+  const logout = useAuthStore((state) => state.logout)
+  const currentUser = storeUser ?? mockUsers[0]
   const initials = currentUser.name
     .split(' ')
     .map((part) => part[0])
     .slice(0, 2)
     .join('')
+
+  async function handleSidebarLogout() {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <div className="min-h-screen bg-[#F3F4FA] font-[Montserrat] text-[#1F2C4F]">
@@ -110,17 +120,20 @@ export default function Layout() {
             <button
               type="button"
               aria-label="Pengaturan"
+              onClick={() => navigate('/settings')}
               className="grid h-11 w-11 place-items-center rounded-full text-[#44464F] transition hover:bg-[#F6F7FC] hover:text-[#1D3668]"
             >
               <Settings size={20} strokeWidth={1.8} />
             </button>
-            <span
+            <button
+              type="button"
+              onClick={() => navigate('/settings')}
               aria-label={`Profil ${currentUser.name}`}
-              title={currentUser.name}
-              className="grid h-8 w-8 place-items-center rounded-full bg-[#1D3668] text-[10px] font-bold text-white"
+              title={`Buka Pengaturan Profil (${currentUser.name})`}
+              className="grid h-8 w-8 place-items-center rounded-full bg-[#1D3668] text-[10px] font-bold text-white transition hover:ring-2 hover:ring-[#1D3668]/30"
             >
               {initials}
-            </span>
+            </button>
           </div>
         </div>
       </header>
@@ -131,14 +144,33 @@ export default function Layout() {
           Menu mahasiswa
         </p>
         <NavigationItems />
-        <div className="mt-auto rounded-2xl border border-[#DFE4F1] bg-[#F6F7FC] p-4">
-          <div className="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
-            <UserRound size={18} />
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          title="Buka Pengaturan Profil"
+          className="mt-auto block w-full rounded-2xl border border-[#DFE4F1] bg-[#F6F7FC] p-4 text-left transition hover:border-[#1D3668]/30 hover:bg-[#EEF2FA]"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
+              <UserRound size={18} />
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#757780]">Edit Profil</span>
           </div>
-          <p className="text-sm font-bold text-[#1F2C4F]">{currentUser.name}</p>
-          <p className="mt-1 text-xs text-[#56638A]">{currentUser.program_studi}</p>
-          <p className="mt-3 text-[10px] font-semibold text-[#757780]">Mahasiswa · Smart Focus</p>
-        </div>
+          <p className="truncate text-sm font-bold text-[#1F2C4F]">{currentUser.name}</p>
+          <p className="mt-1 truncate text-xs text-[#56638A]">{currentUser.major || currentUser.program_studi}</p>
+          <p className="mt-2.5 truncate text-[10px] font-semibold text-[#757780]">
+            {currentUser.university ? `${currentUser.university} · Smart Focus` : 'Mahasiswa · Smart Focus'}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={handleSidebarLogout}
+          title="Keluar dari akun aplikasi"
+          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50/80 py-2 px-3 text-xs font-bold text-red-600 transition hover:bg-red-100 hover:text-red-700 active:scale-[0.98]"
+        >
+          <LogOut size={15} aria-hidden="true" />
+          <span>Keluar Akun</span>
+        </button>
       </aside>
 
       <main className="min-h-screen bg-[#F3F4FA] pb-[calc(5rem+env(safe-area-inset-bottom))] pt-[calc(3.5rem+env(safe-area-inset-top))] lg:ml-[248px] lg:pb-8 lg:pt-0">

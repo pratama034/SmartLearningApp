@@ -1,7 +1,7 @@
 import { CalendarDays, Clock3, Plus, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useStudyStore } from '../store/studyStore'
-import { useAuthStore } from '../store/authStore'
+import { getStudyDate } from '../data/mockData'
 import type { StudyBlockType } from '../types'
 import { z } from 'zod'
 
@@ -29,8 +29,8 @@ export default function StudyBlocks() {
   const blocks = useStudyStore((state) => state.blocks)
   const addBlock = useStudyStore((state) => state.addBlock)
   const deleteBlock = useStudyStore((state) => state.deleteBlock)
-  const syncError = useStudyStore((state) => state.syncError)
-  const user = useAuthStore((state) => state.user)
+  const isLoading = useStudyStore((state) => state.isLoading)
+  const error = useStudyStore((state) => state.error)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [type, setType] = useState<StudyBlockType>('Belajar mandiri')
@@ -43,7 +43,7 @@ export default function StudyBlocks() {
     setFormError('')
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const validation = studyBlockSchema.safeParse({ title, type, startTime, endTime })
 
@@ -52,20 +52,21 @@ export default function StudyBlocks() {
       return
     }
 
-    void addBlock({
-      id: crypto.randomUUID(),
-      user_id: user?.id ?? 'user-uuid-001',
-      title: validation.data.title,
-      type: validation.data.type,
-      start_time: validation.data.startTime,
-      end_time: validation.data.endTime,
-      description: '',
-      recurrence_rule: null,
-      date: new Date().toISOString().slice(0, 10),
-      auto_focus: false,
-      co_focus_enabled: false,
-      status: 'scheduled',
-    })
+    try {
+      await addBlock({
+        title: validation.data.title,
+        type: validation.data.type,
+        start_time: validation.data.startTime,
+        end_time: validation.data.endTime,
+        description: '',
+        recurrence_rule: null,
+        date: getStudyDate(),
+        auto_focus: false,
+        co_focus_enabled: false,
+      })
+    } catch {
+      return
+    }
 
     setTitle('')
     setType('Belajar mandiri')
@@ -85,6 +86,7 @@ export default function StudyBlocks() {
         <button
           type="button"
           onClick={() => setIsModalOpen(true)}
+          disabled={isLoading}
           className="flex h-[46px] shrink-0 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 active:scale-[0.98]"
         >
           <Plus size={18} strokeWidth={2.4} />
@@ -97,9 +99,16 @@ export default function StudyBlocks() {
           <h2 id="study-block-list-title" className="text-[18px] font-bold leading-6 text-[#1F2C4F]">Jadwal tersimpan</h2>
           <span className="rounded-full bg-[#E1EAF8] px-2.5 py-1 text-[11px] font-semibold text-[#1D3668]">{blocks.length} jadwal</span>
         </div>
-        {syncError && <p role="status" className="mb-3 rounded-lg bg-[#FDEBC8] px-3 py-2 text-xs font-medium text-[#7A4B00]">{syncError}</p>}
+        {error && <p role="alert" className="mb-3 rounded-lg bg-[#FDEBC8] px-3 py-2 text-xs font-medium text-[#7A4B00]">{error}</p>}
 
-        {blocks.length ? (
+        {isLoading ? (
+          <div className="rounded-2xl border border-[#DFE4F1] bg-white px-5 py-10 text-center text-sm font-medium text-[#56638A]">
+            <span className="inline-flex items-center gap-2" role="status" aria-live="polite">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#DFE4F1] border-t-[#1D3668]" aria-hidden="true" />
+              Sedang memuat jadwal...
+            </span>
+          </div>
+        ) : blocks.length ? (
           <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
             {blocks.map((block) => (
               <article key={block.id} className="flex min-h-[196px] flex-col rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
@@ -109,7 +118,7 @@ export default function StudyBlocks() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => deleteBlock(block.id)}
+                    onClick={() => void deleteBlock(block.id).catch(() => undefined)}
                     aria-label={`Hapus jadwal ${block.title}`}
                     className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[#FCDDE6] text-[#8E1744] transition hover:bg-[#FCDDE6] focus:outline-none focus:ring-2 focus:ring-[#BE2257] focus:ring-offset-2"
                   >

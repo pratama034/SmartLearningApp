@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "SmartLearning",
+    "slug": "smartlearning-android",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["android"],
+    "android": {
+      "package": "com.smartlearning.app"
+    }
+  }
+}
