@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from 'expo'
+import { Platform } from 'react-native'
 
 export type HeldNotification = {
   id: string
@@ -21,7 +22,18 @@ type FocusEnforcementModule = {
   clearHeldNotifications(): void
 }
 
-const nativeModule = requireOptionalNativeModule<Omit<FocusEnforcementModule, 'isNativeAvailable'>>('FocusEnforcement')
+function getNativeModule(): Omit<FocusEnforcementModule, 'isNativeAvailable'> | null {
+  if (Platform.OS !== 'android') {
+    return null
+  }
+  try {
+    return requireOptionalNativeModule<Omit<FocusEnforcementModule, 'isNativeAvailable'>>('FocusEnforcement')
+  } catch {
+    return null
+  }
+}
+
+const nativeModule = getNativeModule()
 
 const FocusEnforcement: FocusEnforcementModule = {
   isNativeAvailable: () => nativeModule !== null,

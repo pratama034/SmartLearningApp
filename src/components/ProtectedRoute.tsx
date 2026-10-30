@@ -3,8 +3,8 @@ import { useAuthStore } from '../store/authStore'
 
 export default function ProtectedRoute() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const isInitialized = useAuthStore((state) => state.isInitialized)
+  const isLoading = useAuthStore((state) => state.isLoading)
 
-  if (!isInitialized) return null
+  if (isLoading) return null
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />
 }

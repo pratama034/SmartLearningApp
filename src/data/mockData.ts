@@ -17,6 +17,7 @@ export type MockStudyBlock = {
   recurrence_rule: string | null
   auto_focus: boolean
   co_focus_enabled: boolean
+  subTasks?: { id: string; title: string; isCompleted: boolean }[]
 }
 
 export function getStudyDate(dayOffset = 0) {
@@ -44,6 +45,11 @@ export const mockStudyBlocks: MockStudyBlock[] = [
     recurrence_rule: null,
     auto_focus: true,
     co_focus_enabled: false,
+    subTasks: [
+      { id: 'st-001', title: 'Membaca materi Normalisasi 1NF hingga 3NF', isCompleted: true },
+      { id: 'st-002', title: 'Menyusun rangkuman contoh kasus tabel relasional', isCompleted: false },
+      { id: 'st-003', title: 'Mengerjakan 5 soal latihan query JOIN & GROUP BY', isCompleted: false },
+    ],
   },
   {
     id: 'block-002',
@@ -56,6 +62,11 @@ export const mockStudyBlocks: MockStudyBlock[] = [
     recurrence_rule: null,
     auto_focus: false,
     co_focus_enabled: true,
+    subTasks: [
+      { id: 'st-004', title: 'Meninjau pembagian tugas anggota tim', isCompleted: true },
+      { id: 'st-005', title: 'Menyepakati alur fitur Co-Focus & mode fokus', isCompleted: false },
+      { id: 'st-006', title: 'Menyiapkan dokumen laporan progres mingguan', isCompleted: false },
+    ],
   },
   {
     id: 'block-003',
@@ -68,6 +79,10 @@ export const mockStudyBlocks: MockStudyBlock[] = [
     recurrence_rule: null,
     auto_focus: true,
     co_focus_enabled: false,
+    subTasks: [
+      { id: 'st-007', title: 'Mengulang rumus distribusi normal dan binomial', isCompleted: false },
+      { id: 'st-008', title: 'Menyelesaikan paket soal tahun lalu', isCompleted: false },
+    ],
   },
   {
     id: 'block-004',
@@ -80,6 +95,10 @@ export const mockStudyBlocks: MockStudyBlock[] = [
     recurrence_rule: null,
     auto_focus: false,
     co_focus_enabled: false,
+    subTasks: [
+      { id: 'st-009', title: 'Menganalisis kontras warna dan tipografi', isCompleted: false },
+      { id: 'st-010', title: 'Membuat catatan evaluasi komponen interaktif', isCompleted: false },
+    ],
   },
 ]
 
@@ -106,8 +125,12 @@ export type MockChatMessage = {
   kind: 'text' | 'image' | 'document'
   text?: string
   fileName?: string
-  fileType?: 'PDF' | 'Word'
+  fileType?: 'PDF' | 'Word' | 'JPG'
+  fileSize?: string
+  imageUrl?: string
   imageLabel?: string
+  replyTo?: string
+  isDeleted?: boolean
 }
 
 export const mockChatMessages: MockChatMessage[] = [

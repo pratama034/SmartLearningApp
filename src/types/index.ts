@@ -8,6 +8,9 @@ export interface User {
   nim: string
   major: string
   university: string
+  streak: number
+  badges: string[]
+  isPrivateProfile: boolean
   role?: UserRole
   program_studi?: string
   timezone?: string
@@ -20,19 +23,32 @@ export type StudyBlockType =
   | 'Kerja kelompok'
   | 'Persiapan ujian'
 
+export interface StudyBlockSubTask {
+  id: string
+  title: string
+  isCompleted: boolean
+}
+
 export interface StudyBlock {
   id: string
   user_id?: string
+  userId?: string
   type: StudyBlockType
   title: string
   description: string
   start_time: string
+  startTime?: string
   end_time: string
+  endTime?: string
   recurrence_rule: string | null
+  recurrenceRule?: string | null
   date: string
   auto_focus: boolean
+  autoFocus?: boolean
   co_focus_enabled: boolean
+  coFocusEnabled?: boolean
   status?: 'scheduled' | 'active' | 'completed'
+  subTasks?: { id: string; title: string; isCompleted: boolean }[]
 }
 
 export type FocusSessionStatus = 'active' | 'paused' | 'completed'

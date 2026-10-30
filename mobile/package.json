@@ -4,9 +4,12 @@
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "start": "expo start",
-    "start:dev-client": "expo start --dev-client",
-    "android": "expo run:android",
+    "start": "expo start --go",
+    "start:tunnel": "expo start --go --tunnel",
+    "start:clear": "expo start --go --clear",
+    "android": "expo start --go --android",
+    "ios": "expo start --go --ios",
+    "run:android": "expo run:android",
     "prebuild": "expo prebuild",
     "build:apk": "expo prebuild && cd android && gradlew.bat assembleRelease"
   },
@@ -17,11 +20,11 @@
   },
   "dependencies": {
     "expo": "~58.0.0",
-    "expo-dev-client": "~58.0.16",
     "react": "19.3.0",
     "react-native": "0.88.0"
   },
   "devDependencies": {
+    "@expo/config-plugins": "^9.0.0",
     "@types/react": "~19.3.0",
     "typescript": "~6.0.0"
   },

@@ -1,16 +1,22 @@
 import {
+  AlertCircle,
   ArrowRight,
   Bell,
   CalendarDays,
   Check,
   CheckCircle2,
   Clock3,
+  Flame,
   Lightbulb,
+  Loader2,
+  Medal,
   Play,
   ShieldCheck,
   UsersRound,
+  X,
   type LucideIcon,
 } from 'lucide-react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   mockGroupMembers,
@@ -19,6 +25,7 @@ import {
   mockUsers,
 } from '../lib/mockData'
 import { useAuthStore } from '../store/authStore'
+import WelcomeModal from '../components/WelcomeModal'
 import { useSessionStore, type FocusStatus } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
 import type { StudyBlock } from '../types'
@@ -217,16 +224,28 @@ function StudyBlockCard({
 export default function Dashboard() {
   const navigate = useNavigate()
   const authUser = useAuthStore((state) => state.user)
+  const hasSeenOnboarding = useAuthStore((state) => state.hasSeenOnboarding)
+  const setHasSeenOnboarding = useAuthStore((state) => state.setHasSeenOnboarding)
   const currentUser = authUser ?? mockUsers[0]
-  const blocks = useStudyStore((state) => state.blocks)
+  const blocks = useStudyStore((state) => state.studyBlocks)
+  const fetchStudyBlocks = useStudyStore((state) => state.fetchStudyBlocks)
+  const isLoadingBlocks = useStudyStore((state) => state.isLoading)
+  const studyError = useStudyStore((state) => state.error)
+  const clearStudyError = useStudyStore((state) => state.clearError)
   const activeBlock = useSessionStore((state) => state.activeBlock)
   const focusStatus = useSessionStore((state) => state.status)
   const startSession = useSessionStore((state) => state.startSession)
   const today = getTodayDate()
 
+  useEffect(() => {
+    if (authUser?.id) {
+      void fetchStudyBlocks(authUser.id)
+    }
+  }, [authUser?.id, fetchStudyBlocks])
+
   const todayBlocks = blocks
     .filter((block) => block.date === today)
-    .sort((a, b) => a.start_time.localeCompare(b.start_time))
+    .sort((a, b) => (a.startTime ?? a.start_time).localeCompare(b.startTime ?? b.start_time))
   const userSessions = mockSessions
     .filter((session) => session.user_id === currentUser.id && session.status !== 'active')
     .sort((a, b) => b.started_at.localeCompare(a.started_at))
@@ -282,22 +301,68 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      {!hasSeenOnboarding && (
+        <WelcomeModal userName={currentUser.name} onClose={setHasSeenOnboarding} />
+      )}
+      {studyError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <AlertCircle size={19} className="shrink-0 text-red-600" aria-hidden="true" />
+            <p className="text-xs font-bold sm:text-sm">{studyError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={clearStudyError}
+            aria-label="Tutup peringatan jadwal"
+            className="rounded-lg p-1 text-red-600 transition hover:bg-red-100"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       <section className="relative overflow-hidden rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-6">
         <div className="pointer-events-none absolute -bottom-10 -right-10 h-36 w-36 rounded-full bg-[#E1EAF8]/70 blur-xl" />
         <div className="relative z-10 flex flex-col gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">
-            {getDisplayDate()}
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">
+              {getDisplayDate()}
+            </span>
+            {/* Widget Streak Api */}
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-extrabold text-orange-700 shadow-2xs">
+              <Flame size={15} className="fill-orange-500 text-orange-500" aria-hidden="true" />
+              <span>{currentUser.streak ?? 3} Hari Beruntun!</span>
+            </div>
+          </div>
           <h1 className="text-[22px] font-extrabold leading-7 tracking-tight text-[#1F2C4F] sm:text-[28px] sm:leading-9">
             {getGreeting()}, {currentUser.name.split(' ')[0]}
           </h1>
           <p className="text-[13px] leading-[19px] text-[#44464F]">
             Pantau fokus belajarmu dan kelola study block hari ini.
           </p>
+
+          {/* Baris Badge Medali */}
+          {(currentUser.badges?.length ?? 0) > 0 && (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {currentUser.badges.map((badge) => (
+                <span
+                  key={badge}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50/90 px-3 py-1 text-xs font-bold text-amber-800"
+                >
+                  <Medal size={14} className="text-amber-500" aria-hidden="true" />
+                  <span>{badge}</span>
+                </span>
+              ))}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleMainAction}
-            className="mt-1 flex h-[46px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition-transform hover:bg-[#A11B48] active:scale-[0.98]"
+            className="mt-2 flex h-[46px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition-transform hover:bg-[#A11B48] active:scale-[0.98]"
           >
             <span>{activeBlock ? 'Buka Sesi Fokus Aktif' : 'Mulai Mode Fokus Sekarang'}</span>
             {activeBlock ? <ArrowRight size={17} /> : <Play size={16} fill="currentColor" />}
@@ -353,7 +418,28 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {todayBlocks.length ? (
+          {isLoadingBlocks ? (
+            <div role="status" aria-live="polite" className="space-y-3.5">
+              <div className="flex items-center justify-center gap-2.5 rounded-2xl border border-[#DFE4F1] bg-white px-5 py-5 text-xs font-semibold text-[#1D3668] shadow-[0_2px_4px_rgba(29,54,104,0.03)] sm:text-sm">
+                <Loader2 size={18} className="animate-spin text-[#BE2257]" aria-hidden="true" />
+                <span>Mengambil jadwal hari ini dari Supabase Cloud...</span>
+              </div>
+              {[1, 2].map((skeletonId) => (
+                <div
+                  key={skeletonId}
+                  className="animate-pulse space-y-3 rounded-2xl border border-[#DFE4F1] bg-white p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 w-24 rounded bg-[#E1EAF8]" />
+                    <div className="h-5 w-20 rounded-full bg-[#EEF1F8]" />
+                  </div>
+                  <div className="h-6 w-3/4 rounded-lg bg-[#EEF1F8]" />
+                  <div className="h-4 w-1/2 rounded-lg bg-[#F6F7FC]" />
+                  <div className="h-11 w-full rounded-[10px] bg-[#EEF1F8]" />
+                </div>
+              ))}
+            </div>
+          ) : todayBlocks.length ? (
             <div className="space-y-3.5">
               {todayBlocks.map((block) => (
                 <StudyBlockCard

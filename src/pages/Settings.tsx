@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import {
   Building2,
   CheckCircle2,
+  Flame,
   GraduationCap,
   Hash,
   LogOut,
   Mail,
+  Medal,
   Save,
   Settings as SettingsIcon,
   ShieldAlert,
+  ShieldCheck,
   User as UserIcon,
   UserRound,
 } from 'lucide-react'
@@ -19,14 +22,26 @@ export default function Settings() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const updateProfile = useAuthStore((state) => state.updateProfile)
+  const togglePrivacy = useAuthStore((state) => state.togglePrivacy)
   const logout = useAuthStore((state) => state.logout)
+  const isPrivateProfile = user?.isPrivateProfile ?? false
 
+  const [prevUserId, setPrevUserId] = useState(user?.id)
   const [name, setName] = useState(user?.name || '')
   const [nim, setNim] = useState(user?.nim || '')
   const [major, setMajor] = useState(user?.major || '')
   const [university, setUniversity] = useState(user?.university || '')
   const [showSuccessToast, setShowSuccessToast] = useState(false)
+  const [errorToast, setErrorToast] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  if (user?.id !== prevUserId) {
+    setPrevUserId(user?.id)
+    setName(user?.name || '')
+    setNim(user?.nim || '')
+    setMajor(user?.major || '')
+    setUniversity(user?.university || '')
+  }
 
   // Auto-hide success toast after 3.5 seconds
   useEffect(() => {
@@ -36,24 +51,57 @@ export default function Settings() {
     }
   }, [showSuccessToast])
 
-  function handleSaveProfile(event: FormEvent<HTMLFormElement>) {
+  // Auto-hide error toast after 5 seconds
+  useEffect(() => {
+    if (errorToast) {
+      const timer = window.setTimeout(() => setErrorToast(null), 5000)
+      return () => window.clearTimeout(timer)
+    }
+  }, [errorToast])
+
+  async function handleSaveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsSubmitting(true)
+    setErrorToast(null)
 
-    updateProfile({
-      name: name.trim(),
-      nim: nim.trim(),
-      major: major.trim(),
-      university: university.trim(),
-    })
+    try {
+      await updateProfile({
+        name: name.trim(),
+        nim: nim.trim(),
+        major: major.trim(),
+        university: university.trim(),
+      })
+      setShowSuccessToast(true)
+    } catch (error) {
+      setErrorToast(
+        error instanceof Error ? error.message : 'Gagal menyimpan perubahan profil ke Supabase.'
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
-    setIsSubmitting(false)
-    setShowSuccessToast(true)
+  async function handleTogglePrivacy() {
+    setErrorToast(null)
+    try {
+      await togglePrivacy(!isPrivateProfile)
+      setShowSuccessToast(true)
+    } catch (error) {
+      setErrorToast(
+        error instanceof Error ? error.message : 'Gagal memperbarui pengaturan privasi.'
+      )
+    }
   }
 
   async function handleLogout() {
-    await logout()
-    navigate('/login', { replace: true })
+    setErrorToast(null)
+    try {
+      await logout()
+      navigate('/login', { replace: true })
+    } catch (error) {
+      setErrorToast(error instanceof Error ? error.message : 'Gagal keluar dari sesi akun.')
+      navigate('/login', { replace: true })
+    }
   }
 
   const initials = (name || user?.name || 'M')
@@ -74,12 +122,32 @@ export default function Settings() {
         >
           <div className="flex items-center gap-3">
             <CheckCircle2 size={20} className="shrink-0 text-[#17623A]" aria-hidden="true" />
-            <p className="text-sm font-bold">Profil berhasil diperbarui</p>
+            <p className="text-sm font-bold">Profil berhasil diperbarui di Supabase</p>
           </div>
           <button
             type="button"
             onClick={() => setShowSuccessToast(false)}
             className="text-xs font-semibold hover:underline"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {errorToast && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 shadow-md transition-all animate-in fade-in slide-in-from-top-2"
+        >
+          <div className="flex items-center gap-3">
+            <ShieldAlert size={20} className="shrink-0 text-red-600" aria-hidden="true" />
+            <p className="text-sm font-bold">{errorToast}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorToast(null)}
+            className="text-xs font-semibold text-red-700 hover:underline"
           >
             Tutup
           </button>
@@ -277,6 +345,78 @@ export default function Settings() {
             </button>
           </div>
         </form>
+      </section>
+
+      {/* Pengaturan Privasi & Gamifikasi */}
+      <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-7">
+        <div className="mb-6 flex items-center gap-3 border-b border-[#DFE4F1] pb-4">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
+            <ShieldCheck size={20} aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-[18px] font-bold leading-6 text-[#1F2C4F]">Pengaturan Privasi & Gamifikasi</h2>
+            <p className="text-xs text-[#56638A]">
+              Kelola visibilitas profil Anda di papan peringkat kampus dan pantau pencapaian belajar.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          {/* Toggle Switch Privasi Leaderboard */}
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#DFE4F1] bg-[#F6F7FC] p-4">
+            <div>
+              <label htmlFor="privacy-leaderboard-switch" className="cursor-pointer text-sm font-bold text-[#1F2C4F]">
+                Sembunyikan profil dari Leaderboard Kampus
+              </label>
+              <p className="mt-1 text-xs leading-[18px] text-[#56638A]">
+                {isPrivateProfile
+                  ? 'Profil Anda saat ini bersifat privat dan tidak ditampilkan di peringkat publik kampus.'
+                  : 'Nama dan capaian jam fokus Anda dapat dilihat oleh rekan satu kampus.'}
+              </p>
+            </div>
+            <button
+              id="privacy-leaderboard-switch"
+              type="button"
+              role="switch"
+              aria-checked={isPrivateProfile}
+              onClick={() => void handleTogglePrivacy()}
+              className={`relative h-[26px] w-12 shrink-0 rounded-full transition focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 ${
+                isPrivateProfile ? 'bg-[#1D3668]' : 'bg-[#DFE4F1]'
+              }`}
+            >
+              <span
+                className={`absolute top-[3px] h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                  isPrivateProfile ? 'translate-x-[25px]' : 'translate-x-[3px]'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Info Streak & Badges */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#DFE4F1] bg-white p-4">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-orange-50 text-orange-500">
+                <Flame size={19} aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-[#757780]">Streak Belajar</p>
+                <p className="text-sm font-extrabold text-[#1F2C4F]">{user?.streak ?? 3} Hari Beruntun!</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {(user?.badges ?? ['Fokus Master', 'Awal yang Baik']).map((badge) => (
+                <span
+                  key={badge}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800"
+                >
+                  <Medal size={14} className="text-amber-500" aria-hidden="true" />
+                  {badge}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Bagian Akun (Danger Zone) */}

@@ -40,17 +40,27 @@ const palette = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Fokus')
-  const [focusActive, setFocusActive] = useState(false)
+  const [nativeAvailable, setNativeAvailable] = useState(() => FocusEnforcement.isNativeAvailable())
+  const [focusActive, setFocusActive] = useState(() =>
+    FocusEnforcement.isNativeAvailable() ? FocusEnforcement.isFocusEnabled() : false
+  )
   const [blockedPackages, setBlockedPackages] = useState([
     'com.instagram.android',
     'com.zhiliaoapp.musically',
     'com.whatsapp',
   ])
-  const [accessibilityEnabled, setAccessibilityEnabled] = useState(false)
-  const [notificationAccessEnabled, setNotificationAccessEnabled] = useState(false)
-  const [nativeAvailable, setNativeAvailable] = useState(false)
-  const [heldNotificationCount, setHeldNotificationCount] = useState(0)
-  const [heldNotifications, setHeldNotifications] = useState<HeldNotification[]>([])
+  const [accessibilityEnabled, setAccessibilityEnabled] = useState(() =>
+    FocusEnforcement.isNativeAvailable() ? FocusEnforcement.isAccessibilityEnabled() : false
+  )
+  const [notificationAccessEnabled, setNotificationAccessEnabled] = useState(() =>
+    FocusEnforcement.isNativeAvailable() ? FocusEnforcement.isNotificationAccessEnabled() : false
+  )
+  const [heldNotifications, setHeldNotifications] = useState<HeldNotification[]>(() =>
+    FocusEnforcement.isNativeAvailable() ? FocusEnforcement.getHeldNotifications() : []
+  )
+  const [heldNotificationCount, setHeldNotificationCount] = useState(() =>
+    FocusEnforcement.isNativeAvailable() ? FocusEnforcement.getHeldNotifications().length : 0
+  )
   const [message, setMessage] = useState('')
   const [chat, setChat] = useState(mockChatMessages)
 
@@ -73,7 +83,6 @@ export default function App() {
   }
 
   useEffect(() => {
-    refreshNativeAccess()
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') refreshNativeAccess()
     })

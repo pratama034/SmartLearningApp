@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  CloudDrizzle,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -95,6 +96,20 @@ function Brand() {
   )
 }
 
+function SyncIndicator({ compact = false }: { compact?: boolean }) {
+  return (
+    <span
+      role="status"
+      title="Semua data disimpan di perangkat ini (localStorage)"
+      className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
+    >
+      <CloudDrizzle className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className={compact ? 'hidden min-[380px]:inline' : ''}>Tersimpan Lokal</span>
+      {compact && <span className="sr-only min-[380px]:hidden">Tersimpan Lokal</span>}
+    </span>
+  )
+}
+
 export default function Layout() {
   const navigate = useNavigate()
   const storeUser = useAuthStore((state) => state.user)
@@ -117,6 +132,7 @@ export default function Layout() {
         <div className="flex h-14 items-center justify-between px-4">
           <Brand />
           <div className="flex items-center gap-1">
+            <SyncIndicator compact />
             <button
               type="button"
               aria-label="Pengaturan"
@@ -175,6 +191,18 @@ export default function Layout() {
 
       <main className="min-h-screen bg-[#F3F4FA] pb-[calc(5rem+env(safe-area-inset-bottom))] pt-[calc(3.5rem+env(safe-area-inset-top))] lg:ml-[248px] lg:pb-8 lg:pt-0">
         <div className="mx-auto w-full max-w-[1120px] px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+          <div className="mb-4 hidden items-center justify-end gap-3 lg:flex">
+            <SyncIndicator />
+            <button
+              type="button"
+              onClick={() => navigate('/settings')}
+              aria-label={`Profil ${currentUser.name}`}
+              title={`Buka Pengaturan Profil (${currentUser.name})`}
+              className="grid h-8 w-8 place-items-center rounded-full bg-[#1D3668] text-[10px] font-bold text-white transition hover:ring-2 hover:ring-[#1D3668]/30"
+            >
+              {initials}
+            </button>
+          </div>
           <Outlet />
         </div>
       </main>

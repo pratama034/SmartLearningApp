@@ -8,7 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "dev:vercel": "vercel dev"
+    "dev:vercel": "vercel dev",
+    "mobile": "npm --prefix mobile run start",
+    "mobile:tunnel": "npm --prefix mobile run start:tunnel",
+    "mobile:clear": "npm --prefix mobile run start:clear"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

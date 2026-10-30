@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Session } from '@supabase/supabase-js'
+import type { Session, Subscription, User as SupabaseAuthUser } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
 export interface User {
@@ -9,170 +9,507 @@ export interface User {
   nim: string
   major: string
   university: string
+  streak: number
+  badges: string[]
+  isPrivateProfile: boolean
   role?: 'mahasiswa' | 'dosen' | 'admin'
   program_studi?: string
   timezone?: string
   tenant_id?: string
 }
 
-export const initialMockUser: User = {
-  id: 'mhs-2201082001',
-  name: 'Budi Santoso',
-  email: 'budi.santoso@mahasiswa.ac.id',
-  nim: '2201082001',
-  major: 'Teknik Informatika',
-  university: 'Universitas Indonesia',
-  program_studi: 'Teknik Informatika',
-  role: 'mahasiswa',
-  timezone: 'Asia/Jakarta',
-  tenant_id: 'ui-depok',
+interface ProfileRow {
+  id: string
+  name: string | null
+  email: string | null
+  nim: string | null
+  major: string | null
+  university: string | null
+  streak: number | null
+  badges: string[] | null
+  is_private_profile: boolean | null
+  has_seen_onboarding?: boolean | null
+  role?: 'mahasiswa' | 'dosen' | 'admin' | null
+  timezone?: string | null
+  tenant_id?: string | null
 }
 
 const STORAGE_KEY = 'smartlearning-user'
+const ONBOARDING_KEY = 'smartlearning-onboarding-seen'
 
-function getStoredUser(): User | null {
-  if (typeof window === 'undefined') return initialMockUser
+function getStoredOnboardingFlag(): boolean {
+  if (typeof window === 'undefined') return false
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      return JSON.parse(raw) as User
-    }
+    return window.localStorage.getItem(ONBOARDING_KEY) === 'true'
   } catch {
-    // Ignore JSON parse errors and return default mock
+    return false
   }
-  return initialMockUser
 }
 
-const initialUser = getStoredUser()
+function mapProfileToUser(authUser: SupabaseAuthUser, profile?: ProfileRow | null): User {
+  const fallbackName =
+    (authUser.user_metadata?.name as string | undefined) ||
+    authUser.email?.split('@')[0] ||
+    'Mahasiswa'
+  const major = profile?.major ?? (authUser.user_metadata?.major as string | undefined) ?? ''
+
+  return {
+    id: profile?.id || authUser.id,
+    name: profile?.name || fallbackName,
+    email: profile?.email || authUser.email || '',
+    nim: profile?.nim ?? (authUser.user_metadata?.nim as string | undefined) ?? '',
+    major,
+    university:
+      profile?.university ??
+      (authUser.user_metadata?.university as string | undefined) ??
+      'Universitas Indonesia',
+    streak: typeof profile?.streak === 'number' ? profile.streak : 3,
+    badges:
+      Array.isArray(profile?.badges) && profile.badges.length > 0
+        ? profile.badges
+        : ['Fokus Master', 'Awal yang Baik'],
+    isPrivateProfile: Boolean(profile?.is_private_profile),
+    program_studi: major,
+    role: profile?.role ?? 'mahasiswa',
+    timezone: profile?.timezone ?? 'Asia/Jakarta',
+    tenant_id: profile?.tenant_id ?? 'default',
+  }
+}
+
+async function fetchProfileByUser(
+  authUser: SupabaseAuthUser
+): Promise<{ user: User; hasSeenOnboarding?: boolean }> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle<ProfileRow>()
+
+    if (error) {
+      console.warn(
+        '[Supabase Profiles] Tabel profiles belum ada atau terjadi kendala query (404/Not Found). Menggunakan metadata sesi auth:',
+        error.message
+      )
+      return {
+        user: mapProfileToUser(authUser, null),
+        hasSeenOnboarding: false,
+      }
+    }
+
+    // Jika tabel profiles ada tetapi baris data user belum ada
+    // (misalnya akun dibuat sebelum trigger database diaktifkan)
+    if (!data) {
+      try {
+        const fallbackName =
+          (authUser.user_metadata?.name as string | undefined) ||
+          authUser.email?.split('@')[0] ||
+          'Mahasiswa'
+
+        const newProfilePayload = {
+          id: authUser.id,
+          email: authUser.email || '',
+          name: fallbackName,
+          nim: (authUser.user_metadata?.nim as string | undefined) || '',
+          major: (authUser.user_metadata?.major as string | undefined) || 'Teknik Informatika',
+          university:
+            (authUser.user_metadata?.university as string | undefined) || 'Universitas Indonesia',
+          streak: 3,
+          badges: ['Fokus Master', 'Awal yang Baik'],
+          is_private_profile: false,
+          has_seen_onboarding: false,
+          role: 'mahasiswa',
+          timezone: 'Asia/Jakarta',
+          tenant_id: 'default',
+        }
+
+        const { data: insertedData, error: insertError } = await supabase
+          .from('profiles')
+          .insert(newProfilePayload)
+          .select('*')
+          .single<ProfileRow>()
+
+        if (!insertError && insertedData) {
+          return {
+            user: mapProfileToUser(authUser, insertedData),
+            hasSeenOnboarding: false,
+          }
+        }
+      } catch {
+        // Abaikan error pembuatan baris otomatis
+      }
+
+      return {
+        user: mapProfileToUser(authUser, null),
+        hasSeenOnboarding: false,
+      }
+    }
+
+    return {
+      user: mapProfileToUser(authUser, data),
+      hasSeenOnboarding:
+        typeof data.has_seen_onboarding === 'boolean' ? data.has_seen_onboarding : undefined,
+    }
+  } catch (err) {
+    console.warn('[Supabase Profiles] Terjadi error tak terduga, menggunakan fallback auth:', err)
+    return {
+      user: mapProfileToUser(authUser, null),
+      hasSeenOnboarding: false,
+    }
+  }
+}
+
+let authSubscription: Subscription | null = null
 
 interface AuthState {
-  isAuthenticated: boolean
-  isInitialized: boolean
   user: User | null
+  isAuthenticated: boolean
+  isLoading: boolean
+  isInitialized: boolean
+  hasSeenOnboarding: boolean
+  authError: string | null
+  clearAuthError: () => void
+  initializeAuth: () => Promise<void>
+  setHasSeenOnboarding: () => void
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, name: string) => Promise<void>
-  updateProfile: (updatedData: Partial<User>) => void
-  logout: () => Promise<void> | void
+  updateProfile: (updatedData: Partial<User>) => Promise<void>
+  togglePrivacy: (isPrivate: boolean) => Promise<void>
+  logout: () => Promise<void>
   setSession: (session: Session | null) => void
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  isAuthenticated: Boolean(initialUser),
-  isInitialized: true,
-  user: initialUser,
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+  isInitialized: false,
+  hasSeenOnboarding: getStoredOnboardingFlag(),
+  authError: null,
+
+  clearAuthError: () => set({ authError: null }),
+
+  initializeAuth: async () => {
+    set({ isLoading: true, authError: null })
+
+    try {
+      // a. Cek sesi aktif saat web dimuat
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession()
+
+      if (sessionError) {
+        throw new Error(sessionError.message)
+      }
+
+      // c. Jika ada sesi, ambil data profil dari tabel profiles
+      if (session?.user) {
+        const { user: profileUser, hasSeenOnboarding } = await fetchProfileByUser(session.user)
+        set((state) => ({
+          user: profileUser,
+          isAuthenticated: true,
+          hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
+        }))
+      } else {
+        set({ user: null, isAuthenticated: false })
+      }
+
+      // b. Daftarkan listener onAuthStateChange
+      if (authSubscription) {
+        authSubscription.unsubscribe()
+      }
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+        if (nextSession?.user) {
+          try {
+            const { user: profileUser, hasSeenOnboarding } = await fetchProfileByUser(
+              nextSession.user
+            )
+            set((state) => ({
+              user: profileUser,
+              isAuthenticated: true,
+              isLoading: false,
+              isInitialized: true,
+              hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
+            }))
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : 'Gagal memuat profil pengguna dari Supabase.'
+            set({
+              user: mapProfileToUser(nextSession.user, null),
+              isAuthenticated: true,
+              isLoading: false,
+              isInitialized: true,
+              authError: message,
+            })
+          }
+        } else {
+          set({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+            isInitialized: true,
+          })
+        }
+      })
+
+      authSubscription = subscription
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Gagal menginisialisasi sesi autentikasi.'
+      set({
+        user: null,
+        isAuthenticated: false,
+        authError: message,
+      })
+    } finally {
+      // d. Set isLoading: false di akhir proses
+      set({ isLoading: false, isInitialized: true })
+    }
+  },
+
+  setHasSeenOnboarding: () => {
+    try {
+      window.localStorage.setItem(ONBOARDING_KEY, 'true')
+    } catch {
+      // Abaikan error localStorage
+    }
+    set({ hasSeenOnboarding: true })
+
+    const currentUser = get().user
+    if (currentUser) {
+      void supabase
+        .from('profiles')
+        .update({ has_seen_onboarding: true, updated_at: new Date().toISOString() })
+        .eq('id', currentUser.id)
+    }
+  },
 
   login: async (email, password) => {
+    set({ authError: null })
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-      if (!error && data?.user) {
-        const loggedInUser: User = {
-          id: data.user.id,
-          name: (data.user.user_metadata?.name as string) || email.split('@')[0] || 'Mahasiswa',
-          email: data.user.email || email,
-          nim: (data.user.user_metadata?.nim as string) || '2201082001',
-          major: (data.user.user_metadata?.major as string) || 'Teknik Informatika',
-          university: (data.user.user_metadata?.university as string) || 'Universitas Indonesia',
-          program_studi: (data.user.user_metadata?.major as string) || 'Teknik Informatika',
-          role: 'mahasiswa',
-        }
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedInUser))
-        set({ isAuthenticated: true, user: loggedInUser, isInitialized: true })
-        return
+      if (error) {
+        throw new Error(error.message)
       }
-    } catch {
-      // In mock environment / offline, proceed with mock user login
-    }
 
-    // Mock login fallback
-    const mockUser: User = {
-      ...initialMockUser,
-      email,
-      name: email.split('@')[0] || initialMockUser.name,
+      if (data.user) {
+        const { user: profileUser, hasSeenOnboarding } = await fetchProfileByUser(data.user)
+        set((state) => ({
+          user: profileUser,
+          isAuthenticated: true,
+          isLoading: false,
+          isInitialized: true,
+          hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
+        }))
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Login gagal. Periksa kembali email dan sandi.'
+      set({ authError: message })
+      throw new Error(message)
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(mockUser))
-    set({ isAuthenticated: true, user: mockUser, isInitialized: true })
   },
 
   register: async (email, password, name) => {
+    set({ authError: null })
     try {
-      const { data, error } = await supabase.auth.signUp({ email, password })
-      if (!error && data.user) {
-        await supabase.from('users').insert({ id: data.user.id, email, name })
-      }
-    } catch {
-      // Allow mock registration fallback
-    }
+      // Trigger database otomatis membuat row di tabel profiles saat signUp berhasil
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name },
+        },
+      })
 
-    const newUser: User = {
-      ...initialMockUser,
-      id: `mhs-${Date.now()}`,
-      name,
-      email,
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      if (data.session?.user) {
+        const { user: profileUser, hasSeenOnboarding } = await fetchProfileByUser(data.session.user)
+        set((state) => ({
+          user: profileUser,
+          isAuthenticated: true,
+          isLoading: false,
+          isInitialized: true,
+          hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
+        }))
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Pendaftaran gagal. Silakan coba lagi.'
+      set({ authError: message })
+      throw new Error(message)
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser))
-    set({ isAuthenticated: true, user: newUser, isInitialized: true })
   },
 
-  updateProfile: (updatedData: Partial<User>) => {
-    set((state) => {
-      if (!state.user) return state
+  updateProfile: async (updatedData: Partial<User>) => {
+    set({ authError: null })
+    const currentUser = get().user
+    if (!currentUser) {
+      const msg = 'Sesi pengguna tidak ditemukan. Silakan masuk kembali.'
+      set({ authError: msg })
+      throw new Error(msg)
+    }
+
+    try {
+      const dbUpdatePayload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      }
+      if (updatedData.name !== undefined) dbUpdatePayload.name = updatedData.name
+      if (updatedData.nim !== undefined) dbUpdatePayload.nim = updatedData.nim
+      if (updatedData.major !== undefined) dbUpdatePayload.major = updatedData.major
+      if (updatedData.university !== undefined) dbUpdatePayload.university = updatedData.university
+      if (updatedData.streak !== undefined) dbUpdatePayload.streak = updatedData.streak
+      if (updatedData.badges !== undefined) dbUpdatePayload.badges = updatedData.badges
+      if (updatedData.isPrivateProfile !== undefined) {
+        dbUpdatePayload.is_private_profile = updatedData.isPrivateProfile
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(dbUpdatePayload)
+        .eq('id', currentUser.id)
+        .select('*')
+        .single<ProfileRow>()
+
+      if (error) {
+        if (
+          error.code === '42P01' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('not found') ||
+          error.message?.includes('relation')
+        ) {
+          throw new Error(
+            'Tabel public.profiles belum dibuat di Supabase. Silakan jalankan script supabase/schema.sql di SQL Editor Supabase.'
+          )
+        }
+        throw new Error(error.message)
+      }
+
+      const nextMajor = data?.major ?? updatedData.major ?? currentUser.major
       const updatedUser: User = {
-        ...state.user,
+        ...currentUser,
         ...updatedData,
-        program_studi: updatedData.major ?? state.user.program_studi ?? updatedData.program_studi,
+        name: data?.name ?? updatedData.name ?? currentUser.name,
+        nim: data?.nim ?? updatedData.nim ?? currentUser.nim,
+        major: nextMajor,
+        program_studi: nextMajor,
+        university: data?.university ?? updatedData.university ?? currentUser.university,
+        streak: typeof data?.streak === 'number' ? data.streak : currentUser.streak,
+        badges: Array.isArray(data?.badges) ? data.badges : currentUser.badges,
+        isPrivateProfile:
+          typeof data?.is_private_profile === 'boolean'
+            ? data.is_private_profile
+            : (updatedData.isPrivateProfile ?? currentUser.isPrivateProfile),
       }
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedUser))
-      } catch {
-        // Ignore storage errors
+
+      set({ user: updatedUser })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Gagal memperbarui profil di Supabase.'
+      set({ authError: message })
+      throw new Error(message)
+    }
+  },
+
+  togglePrivacy: async (isPrivate: boolean) => {
+    set({ authError: null })
+    const currentUser = get().user
+    if (!currentUser) {
+      const msg = 'Sesi pengguna tidak ditemukan. Silakan masuk kembali.'
+      set({ authError: msg })
+      throw new Error(msg)
+    }
+
+    const previousValue = currentUser.isPrivateProfile
+    // Optimistic UI update
+    set({ user: { ...currentUser, isPrivateProfile: isPrivate } })
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          is_private_profile: isPrivate,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentUser.id)
+
+      if (error) {
+        if (
+          error.code === '42P01' ||
+          error.code === 'PGRST204' ||
+          error.message?.includes('not found') ||
+          error.message?.includes('relation')
+        ) {
+          throw new Error(
+            'Tabel public.profiles belum dibuat di Supabase. Silakan jalankan script supabase/schema.sql di SQL Editor Supabase.'
+          )
+        }
+        throw new Error(error.message)
       }
-      return { user: updatedUser }
-    })
+    } catch (error) {
+      // Revert optimistic state if update fails
+      set({ user: { ...currentUser, isPrivateProfile: previousValue } })
+      const message =
+        error instanceof Error ? error.message : 'Gagal mengubah pengaturan privasi di Supabase.'
+      set({ authError: message })
+      throw new Error(message)
+    }
   },
 
   logout: async () => {
+    set({ authError: null })
     try {
-      window.localStorage.removeItem(STORAGE_KEY)
-      window.localStorage.removeItem('smartlearning-session')
-      window.localStorage.removeItem('smartlearning-cofocus-sharing')
-      window.localStorage.removeItem('smartlearning-cofocus-auto-reply')
-    } catch {
-      // Ignore removal error
+      const { error } = await supabase.auth.signOut()
+      if (error) {
+        throw new Error(error.message)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Gagal keluar dari sesi Supabase.'
+      set({ authError: message })
+      throw new Error(message)
+    } finally {
+      try {
+        window.localStorage.removeItem(STORAGE_KEY)
+        window.localStorage.removeItem('smartlearning-session')
+        window.localStorage.removeItem('smartlearning-cofocus-sharing')
+        window.localStorage.removeItem('smartlearning-cofocus-auto-reply')
+        window.localStorage.removeItem(ONBOARDING_KEY)
+      } catch {
+        // Abaikan error penghapusan localStorage
+      }
+      set({ user: null, isAuthenticated: false, isLoading: false, isInitialized: true })
     }
-
-    try {
-      await supabase.auth.signOut()
-    } catch {
-      // Ignore supabase signout error in mock environment
-    }
-
-    set({ isAuthenticated: false, user: null, isInitialized: true })
   },
 
   setSession: (session) => {
     if (session?.user) {
-      const sessionUser: User = {
-        id: session.user.id,
-        name: (session.user.user_metadata?.name as string) || session.user.email?.split('@')[0] || 'Mahasiswa',
-        email: session.user.email || '',
-        nim: (session.user.user_metadata?.nim as string) || '2201082001',
-        major: (session.user.user_metadata?.major as string) || 'Teknik Informatika',
-        university: (session.user.user_metadata?.university as string) || 'Universitas Indonesia',
-        program_studi: (session.user.user_metadata?.major as string) || 'Teknik Informatika',
-        role: 'mahasiswa',
-      }
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionUser))
-      } catch {}
-      set({ isAuthenticated: true, user: sessionUser, isInitialized: true })
+      void fetchProfileByUser(session.user)
+        .then(({ user: profileUser, hasSeenOnboarding }) => {
+          set((state) => ({
+            user: profileUser,
+            isAuthenticated: true,
+            isLoading: false,
+            isInitialized: true,
+            hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
+          }))
+        })
+        .catch(() => {
+          set({
+            user: mapProfileToUser(session.user, null),
+            isAuthenticated: true,
+            isLoading: false,
+            isInitialized: true,
+          })
+        })
     } else {
-      // If no remote session, keep local mock user if exists, or maintain state
-      const existing = get().user
-      if (existing) {
-        set({ isAuthenticated: true, isInitialized: true })
-      } else {
-        set({ isAuthenticated: false, user: null, isInitialized: true })
-      }
+      set({ user: null, isAuthenticated: false, isLoading: false, isInitialized: true })
     }
   },
 }))
