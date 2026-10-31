@@ -56,9 +56,16 @@ export default function WelcomeModal({ userName, onClose }: WelcomeModalProps) {
       >
         <div className="relative overflow-hidden bg-[#1D3668] px-6 pb-6 pt-7 text-white">
           <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-[#BE2257]/40 blur-2xl" />
-          <span className="relative grid h-11 w-11 place-items-center rounded-xl bg-white/15">
-            <Sparkles size={22} aria-hidden="true" />
-          </span>
+          <div className="relative flex items-center justify-between">
+            <img
+              src="/logo.jpg"
+              alt="Logo Smart Focus Akademik"
+              className="h-12 w-12 rounded-xl object-contain border border-white/20 shadow-md"
+            />
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white/80">
+              <Sparkles size={16} aria-hidden="true" />
+            </span>
+          </div>
           <h2 id="welcome-modal-title" className="relative mt-4 text-[22px] font-extrabold leading-7 tracking-tight">
             Selamat Datang di Smart Focus!
           </h2>

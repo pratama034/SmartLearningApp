@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "SmartLearning",
+    "name": "Smart Focus",
     "slug": "smartlearning-android",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.jpg",
     "platforms": [
       "android",
       "ios"

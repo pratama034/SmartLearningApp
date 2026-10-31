@@ -83,13 +83,15 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2">
-      <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#1D3668] text-sm font-extrabold text-white">
-        S
-      </span>
+    <div className="flex items-center gap-2.5">
+      <img
+        src="/logo.jpg"
+        alt="Logo Smart Focus Akademik"
+        className="h-9 w-9 rounded-xl object-contain shadow-xs border border-[#1D3668]/15"
+      />
       <span className="flex flex-col">
-        <span className="text-sm font-bold leading-4 tracking-tight text-[#1D3668]">Smart Focus</span>
-        <span className="mt-0.5 text-[10px] font-bold uppercase leading-3 tracking-[0.08em] text-[#56638A]">
+        <span className="text-sm font-extrabold leading-4 tracking-tight text-[#1D3668]">Smart Focus</span>
+        <span className="mt-0.5 text-[10px] font-bold uppercase leading-3 tracking-[0.08em] text-[#BE2257]">
           Akademik
         </span>
       </span>

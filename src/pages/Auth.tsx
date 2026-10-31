@@ -262,9 +262,11 @@ export default function Auth({ initialView = 'welcome' }: AuthProps) {
           /* ========================================================================= */
           <div>
             <div className="mt-2 flex flex-col items-center text-center">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#1D3668] text-base font-extrabold text-white shadow-sm">
-                S
-              </span>
+              <img
+                src="/logo.jpg"
+                alt="Logo Smart Focus Akademik"
+                className="h-14 w-14 rounded-2xl object-contain shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
+              />
               <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-[#BE2257]">
                 Smart Focus Akademik
               </p>
@@ -401,9 +403,11 @@ export default function Auth({ initialView = 'welcome' }: AuthProps) {
           /* ========================================================================= */
           <div>
             <div className="mt-2 flex flex-col items-center text-center">
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#1D3668] text-base font-extrabold text-white shadow-sm">
-                S
-              </span>
+              <img
+                src="/logo.jpg"
+                alt="Logo Smart Focus Akademik"
+                className="h-14 w-14 rounded-2xl object-contain shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
+              />
               <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-[#BE2257]">
                 Smart Focus Akademik
               </p>

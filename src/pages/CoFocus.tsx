@@ -71,6 +71,7 @@ export default function CoFocus() {
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [createdRoomCode, setCreatedRoomCode] = useState<string | null>(null)
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null)
   const [joinCodeInput, setJoinCodeInput] = useState('')
 
   // Toast / Alert state
@@ -150,6 +151,7 @@ export default function CoFocus() {
       const result = await createGroup(trimmed)
       if (result.success && result.group) {
         setCreatedRoomCode(result.group.joinCode)
+        setCreatedGroupId(result.group.id)
         setToast({
           type: 'success',
           message: `Ruang belajar "${result.group.name}" berhasil dibuat dengan kode: ${result.group.joinCode}!`,
@@ -192,8 +194,14 @@ export default function CoFocus() {
         setJoinCodeInput('')
         setToast({
           type: 'success',
-          message: `Berhasil bergabung ke "${result.group?.name || 'Ruang Belajar'}"!`,
+          message: `Berhasil bergabung ke "${result.group?.name || 'Ruang Belajar'}"! Membuka obrolan...`,
         })
+        if (result.group?.id) {
+          const joinedGroupId = result.group.id
+          setTimeout(() => {
+            navigate('/group/' + joinedGroupId)
+          }, 600)
+        }
       }
     } catch (error) {
       setToast({
@@ -426,7 +434,7 @@ export default function CoFocus() {
               )}
               <button
                 type="button"
-                onClick={() => navigate('/cofocus/room')}
+                onClick={() => navigate('/group/' + activeGroup.id)}
                 className="flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#1D3668] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#162B54] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#BE2257] focus:ring-offset-2"
               >
                 <MessageSquareText size={17} aria-hidden="true" />
@@ -623,7 +631,7 @@ export default function CoFocus() {
                     type="button"
                     onClick={() => {
                       setShowCreateModal(false)
-                      navigate('/cofocus/room')
+                      navigate('/group/' + (createdGroupId || activeGroup?.id || ''))
                     }}
                     className="flex-1 rounded-[10px] bg-[#1D3668] py-2.5 text-xs font-bold text-white hover:bg-[#162B54]"
                   >

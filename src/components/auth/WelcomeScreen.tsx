@@ -15,14 +15,13 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
         {/* Header Branding */}
         <div className="flex flex-col items-center text-center">
           <div className="relative">
+            <img
+              src="/logo.jpg"
+              alt="Logo Smart Focus Akademik"
+              className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-contain shadow-lg shadow-[#1D3668]/20 border border-[#1D3668]/15"
+            />
             <span
-              className="grid h-14 w-14 place-items-center rounded-2xl bg-[#1D3668] text-xl font-extrabold text-white shadow-md shadow-[#1D3668]/25"
-              aria-hidden="true"
-            >
-              S
-            </span>
-            <span
-              className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#BE2257] text-[10px] text-white ring-2 ring-white"
+              className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#BE2257] text-[10px] text-white ring-2 ring-white shadow-sm"
               aria-hidden="true"
             >
               <Sparkles size={11} />
