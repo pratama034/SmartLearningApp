@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Session, Subscription, User as SupabaseAuthUser } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { evaluateStreak, calculateNewStreakOnSessionComplete } from '../lib/streak'
 
 export interface User {
   id: string
@@ -10,6 +11,7 @@ export interface User {
   major: string
   university: string
   streak: number
+  lastStudyDate?: string | null
   badges: string[]
   isPrivateProfile: boolean
   role?: 'mahasiswa' | 'dosen' | 'admin'
@@ -26,6 +28,7 @@ interface ProfileRow {
   major: string | null
   university: string | null
   streak: number | null
+  last_study_date?: string | null
   badges: string[] | null
   is_private_profile: boolean | null
   has_seen_onboarding?: boolean | null
@@ -53,6 +56,23 @@ function mapProfileToUser(authUser: SupabaseAuthUser, profile?: ProfileRow | nul
     'Mahasiswa'
   const major = profile?.major ?? (authUser.user_metadata?.major as string | undefined) ?? ''
 
+  const rawStreak = typeof profile?.streak === 'number' ? profile.streak : 0
+  const rawLastDate = profile?.last_study_date ?? null
+  const evaluation = evaluateStreak(rawStreak, rawLastDate)
+
+  // Jika streak bolong kemarin (needsReset), sinkronkan reset streak ke 0 di database
+  if (evaluation.needsReset && profile?.id) {
+    void supabase
+      .from('profiles')
+      .update({ streak: 0, updated_at: new Date().toISOString() })
+      .eq('id', profile.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn('[Streak Sync] Gagal reset streak ke Supabase:', error.message)
+        }
+      })
+  }
+
   return {
     id: profile?.id || authUser.id,
     name: profile?.name || fallbackName,
@@ -63,7 +83,8 @@ function mapProfileToUser(authUser: SupabaseAuthUser, profile?: ProfileRow | nul
       profile?.university ??
       (authUser.user_metadata?.university as string | undefined) ??
       'Universitas Indonesia',
-    streak: typeof profile?.streak === 'number' ? profile.streak : 3,
+    streak: evaluation.currentStreak,
+    lastStudyDate: rawLastDate,
     badges:
       Array.isArray(profile?.badges) && profile.badges.length > 0
         ? profile.badges
@@ -172,8 +193,9 @@ interface AuthState {
   initializeAuth: () => Promise<void>
   setHasSeenOnboarding: () => void
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, name: string) => Promise<void>
+  register: (email: string, password: string, name: string) => Promise<string>
   updateProfile: (updatedData: Partial<User>) => Promise<void>
+  recordSessionCompletionForStreak: () => Promise<{ newStreak: number; isFirstToday: boolean; todayStr: string }>
   togglePrivacy: (isPrivate: boolean) => Promise<void>
   logout: () => Promise<void>
   setSession: (session: Session | null) => void
@@ -293,6 +315,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
+        if (
+          error.message?.toLowerCase().includes('email not confirmed') ||
+          (error as { code?: string }).code === 'email_not_confirmed'
+        ) {
+          throw new Error('Email belum diverifikasi. Silakan periksa kotak masuk atau spam di Gmail Anda untuk klik tautan konfirmasi.')
+        }
+        if (error.message?.toLowerCase().includes('invalid login credentials')) {
+          throw new Error('Email atau sandi salah. Silakan periksa kembali.')
+        }
         throw new Error(error.message)
       }
 
@@ -316,10 +347,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   register: async (email, password, name) => {
     set({ authError: null })
+
+    const cleanEmail = email.trim()
+    if (!cleanEmail.endsWith('@gmail.com')) {
+      const errorMsg = 'Harap gunakan akun @gmail.com yang aktif'
+      set({ authError: errorMsg })
+      throw new Error(errorMsg)
+    }
+
     try {
-      // Trigger database otomatis membuat row di tabel profiles saat signUp berhasil
-      const { data, error } = await supabase.auth.signUp({
-        email,
+      const { error } = await supabase.auth.signUp({
+        email: cleanEmail,
         password,
         options: {
           data: { name },
@@ -330,20 +368,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error(error.message)
       }
 
-      if (data.session?.user) {
-        const { user: profileUser, hasSeenOnboarding } = await fetchProfileByUser(data.session.user)
-        set((state) => ({
-          user: profileUser,
-          isAuthenticated: true,
-          isLoading: false,
-          isInitialized: true,
-          hasSeenOnboarding: hasSeenOnboarding ?? state.hasSeenOnboarding,
-        }))
-      }
+      // Supabase sekarang mewajibkan konfirmasi email: JANGAN set isAuthenticated: true
+      set({ isAuthenticated: false, isLoading: false })
+
+      // Kembalikan status sukses agar UI dapat menampilkan instruksi verifikasi email
+      return 'check_email'
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Pendaftaran gagal. Silakan coba lagi.'
-      set({ authError: message })
+      set({ authError: message, isLoading: false })
       throw new Error(message)
     }
   },
@@ -366,6 +399,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (updatedData.major !== undefined) dbUpdatePayload.major = updatedData.major
       if (updatedData.university !== undefined) dbUpdatePayload.university = updatedData.university
       if (updatedData.streak !== undefined) dbUpdatePayload.streak = updatedData.streak
+      if (updatedData.lastStudyDate !== undefined) dbUpdatePayload.last_study_date = updatedData.lastStudyDate
       if (updatedData.badges !== undefined) dbUpdatePayload.badges = updatedData.badges
       if (updatedData.isPrivateProfile !== undefined) {
         dbUpdatePayload.is_private_profile = updatedData.isPrivateProfile
@@ -402,6 +436,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         program_studi: nextMajor,
         university: data?.university ?? updatedData.university ?? currentUser.university,
         streak: typeof data?.streak === 'number' ? data.streak : currentUser.streak,
+        lastStudyDate: data?.last_study_date ?? updatedData.lastStudyDate ?? currentUser.lastStudyDate ?? null,
         badges: Array.isArray(data?.badges) ? data.badges : currentUser.badges,
         isPrivateProfile:
           typeof data?.is_private_profile === 'boolean'
@@ -416,6 +451,60 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ authError: message })
       throw new Error(message)
     }
+  },
+
+  recordSessionCompletionForStreak: async () => {
+    const currentUser = get().user
+    if (!currentUser?.id) {
+      return {
+        newStreak: 1,
+        isFirstToday: true,
+        todayStr: new Date().toISOString().split('T')[0],
+      }
+    }
+
+    const { newStreak, isFirstToday, todayStr } = calculateNewStreakOnSessionComplete(
+      currentUser.streak || 0,
+      currentUser.lastStudyDate
+    )
+
+    // Update state user lokal secara instan
+    const updatedUser: User = {
+      ...currentUser,
+      streak: newStreak,
+      lastStudyDate: todayStr,
+    }
+    set({ user: updatedUser })
+
+    // Sinkronkan ke Supabase
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          streak: newStreak,
+          last_study_date: todayStr,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentUser.id)
+
+      if (error) {
+        console.warn(
+          '[Streak Sync] Mencoba fallback update streak jika kolom last_study_date belum tersedia di remote DB:',
+          error.message
+        )
+        await supabase
+          .from('profiles')
+          .update({
+            streak: newStreak,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', currentUser.id)
+      }
+    } catch (err) {
+      console.warn('[Streak Sync] Kendala saat menyimpan streak ke database:', err)
+    }
+
+    return { newStreak, isFirstToday, todayStr }
   },
 
   togglePrivacy: async (isPrivate: boolean) => {

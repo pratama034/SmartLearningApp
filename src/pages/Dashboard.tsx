@@ -16,7 +16,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   mockGroupMembers,
@@ -24,6 +24,7 @@ import {
   mockSessions,
   mockUsers,
 } from '../lib/mockData'
+import { evaluateStreak, formatLastStudyDateLabel } from '../lib/streak'
 import { useAuthStore } from '../store/authStore'
 import WelcomeModal from '../components/WelcomeModal'
 import { useSessionStore, type FocusStatus } from '../store/sessionStore'
@@ -227,6 +228,8 @@ export default function Dashboard() {
   const hasSeenOnboarding = useAuthStore((state) => state.hasSeenOnboarding)
   const setHasSeenOnboarding = useAuthStore((state) => state.setHasSeenOnboarding)
   const currentUser = authUser ?? mockUsers[0]
+  const [isStreakBannerDismissed, setIsStreakBannerDismissed] = useState(false)
+  const streakEvaluation = evaluateStreak(currentUser.streak ?? 0, currentUser.lastStudyDate)
   const blocks = useStudyStore((state) => state.studyBlocks)
   const fetchStudyBlocks = useStudyStore((state) => state.fetchStudyBlocks)
   const isLoadingBlocks = useStudyStore((state) => state.isLoading)
@@ -324,6 +327,86 @@ export default function Dashboard() {
           </button>
         </div>
       )}
+
+      {/* Notifikasi Status Streak Belajar */}
+      {!isStreakBannerDismissed && streakEvaluation.status === 'pending_today' && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-600">
+              <Flame size={20} className="fill-amber-500 text-amber-500" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold sm:text-sm">{streakEvaluation.title}</p>
+              <p className="mt-0.5 text-xs text-amber-800">{streakEvaluation.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsStreakBannerDismissed(true)}
+            aria-label="Tutup notifikasi streak"
+            className="rounded-lg p-1 text-amber-700 transition hover:bg-amber-200/60 shrink-0"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {!isStreakBannerDismissed && streakEvaluation.status === 'broken' && (streakEvaluation.diffDays ?? 0) > 1 && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/90 p-4 text-blue-900 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-100 text-blue-600">
+              <AlertCircle size={20} className="text-blue-600" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold sm:text-sm">{streakEvaluation.title}</p>
+              <p className="mt-0.5 text-xs text-blue-800">{streakEvaluation.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsStreakBannerDismissed(true)}
+            aria-label="Tutup notifikasi streak"
+            className="rounded-lg p-1 text-blue-700 transition hover:bg-blue-100 shrink-0"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {!isStreakBannerDismissed && streakEvaluation.status === 'active_today' && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/90 p-3.5 text-emerald-900 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-100 text-emerald-600">
+              <CheckCircle2 size={18} className="text-emerald-600" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-xs font-extrabold sm:text-sm">{streakEvaluation.title}</p>
+              <p className="text-xs text-emerald-800">{streakEvaluation.message}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsStreakBannerDismissed(true)}
+            aria-label="Tutup notifikasi streak"
+            className="rounded-lg p-1 text-emerald-700 transition hover:bg-emerald-100 shrink-0"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <section className="relative overflow-hidden rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-6">
         <div className="pointer-events-none absolute -bottom-10 -right-10 h-36 w-36 rounded-full bg-[#E1EAF8]/70 blur-xl" />
         <div className="relative z-10 flex flex-col gap-2">
@@ -331,10 +414,35 @@ export default function Dashboard() {
             <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">
               {getDisplayDate()}
             </span>
-            {/* Widget Streak Api */}
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-extrabold text-orange-700 shadow-2xs">
-              <Flame size={15} className="fill-orange-500 text-orange-500" aria-hidden="true" />
-              <span>{currentUser.streak ?? 3} Hari Beruntun!</span>
+            {/* Widget Streak Api Realtime */}
+            <div
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold shadow-2xs transition-all ${
+                streakEvaluation.status === 'active_today'
+                  ? 'border border-orange-300 bg-orange-50 text-orange-700'
+                  : streakEvaluation.status === 'pending_today'
+                    ? 'border border-amber-300 bg-amber-50 text-amber-800 animate-pulse'
+                    : 'border border-slate-200 bg-slate-100 text-slate-600'
+              }`}
+              title={`Terakhir belajar: ${formatLastStudyDateLabel(currentUser.lastStudyDate)}`}
+            >
+              <Flame
+                size={15}
+                className={
+                  streakEvaluation.status === 'active_today'
+                    ? 'fill-orange-500 text-orange-500'
+                    : streakEvaluation.status === 'pending_today'
+                      ? 'fill-amber-500 text-amber-500'
+                      : 'text-slate-400'
+                }
+                aria-hidden="true"
+              />
+              <span>
+                {streakEvaluation.status === 'active_today'
+                  ? `${streakEvaluation.currentStreak} Hari Beruntun! (Selesai)`
+                  : streakEvaluation.status === 'pending_today'
+                    ? `${streakEvaluation.currentStreak} Hari (Perlu Sesi)`
+                    : '0 Hari (Mulai Hari Ini)'}
+              </span>
             </div>
           </div>
           <h1 className="text-[22px] font-extrabold leading-7 tracking-tight text-[#1F2C4F] sm:text-[28px] sm:leading-9">

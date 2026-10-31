@@ -27,6 +27,7 @@ export interface Message {
   id: string
   senderId: string
   senderName: string
+  senderAvatar?: string
   time: string
   kind: 'text' | 'image' | 'document'
   text?: string
@@ -75,16 +76,25 @@ function formatFileSize(bytes: number): string {
 function mapSupabaseRowToMessage(
   row: SupabaseChatMessageRow,
   currentUserId: string | undefined,
-  members: GroupMemberItem[]
+  members: GroupMemberItem[],
+  profileCache?: Map<string, { name: string; avatar: string }>
 ): Message {
   const isOwn = Boolean(currentUserId && row.sender_id === currentUserId)
   const member = members.find((m) => m.userId === row.sender_id)
+  const cachedProfile = profileCache?.get(row.sender_id)
 
   let senderName = 'Rekan Belajar'
+  let senderAvatar = 'RB'
+
   if (isOwn) {
     senderName = 'Anda'
+    senderAvatar = cachedProfile?.avatar || 'Anda'.slice(0, 2).toUpperCase()
   } else if (member?.name) {
     senderName = member.name.replace(' (Anda)', '').replace(' (Host)', '')
+    senderAvatar = member.avatar
+  } else if (cachedProfile?.name) {
+    senderName = cachedProfile.name
+    senderAvatar = cachedProfile.avatar
   }
 
   const time = row.created_at
@@ -95,6 +105,7 @@ function mapSupabaseRowToMessage(
     id: row.id,
     senderId: isOwn ? 'current-user' : row.sender_id,
     senderName,
+    senderAvatar,
     time,
     kind: row.kind,
     text: row.is_deleted ? 'Pesan ini telah dihapus' : (row.text || undefined),
@@ -269,6 +280,7 @@ export default function StudyGroupRoom() {
   const [activeUploadType, setActiveUploadType] = useState<AttachmentType>('pdf')
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const profilesCacheRef = useRef<Map<string, { name: string; avatar: string }>>(new Map())
 
   const groupName = activeGroup?.name || 'Kelompok Belajar'
   const groupMembers = activeGroup?.members || []
@@ -314,8 +326,61 @@ export default function StudyGroupRoom() {
 
         if (isMounted && data) {
           const currentMembers = useGroupStore.getState().activeGroup?.members || []
-          const mapped = (data as SupabaseChatMessageRow[]).map((row) =>
-            mapSupabaseRowToMessage(row, currentUser?.id, currentMembers)
+
+          // Cache known members
+          for (const m of currentMembers) {
+            if (m.userId && !profilesCacheRef.current.has(m.userId)) {
+              profilesCacheRef.current.set(m.userId, {
+                name: m.name.replace(' (Anda)', '').replace(' (Host)', ''),
+                avatar: m.avatar,
+              })
+            }
+          }
+
+          // Cache current user
+          if (currentUser?.id) {
+            const myInitials =
+              currentUser.name
+                ? currentUser.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
+                : 'A'
+            profilesCacheRef.current.set(currentUser.id, {
+              name: currentUser.name || 'Anda',
+              avatar: myInitials,
+            })
+          }
+
+          // Query any missing sender profiles
+          const rawRows = data as SupabaseChatMessageRow[]
+          const uncachedIds = Array.from(new Set(rawRows.map((r) => r.sender_id))).filter(
+            (id) => id && !profilesCacheRef.current.has(id)
+          )
+
+          if (uncachedIds.length > 0) {
+            const { data: profilesData } = await supabase
+              .from('profiles')
+              .select('id, name')
+              .in('id', uncachedIds)
+
+            if (profilesData) {
+              for (const p of profilesData) {
+                const initials = p.name
+                  ? p.name
+                      .split(' ')
+                      .map((w: string) => w[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase()
+                  : 'RB'
+                profilesCacheRef.current.set(p.id, {
+                  name: p.name || 'Rekan Belajar',
+                  avatar: initials,
+                })
+              }
+            }
+          }
+
+          const mapped = rawRows.map((row) =>
+            mapSupabaseRowToMessage(row, currentUser?.id, currentMembers, profilesCacheRef.current)
           )
           setMessages(mapped)
         }
@@ -331,8 +396,8 @@ export default function StudyGroupRoom() {
 
     void loadChatHistory()
 
-    // 2. Setup Realtime Channel
-    const channel = supabase
+    // 2. Setup Realtime Channel for chat messages
+    const chatChannel = supabase
       .channel(`room-chat:${currentGroupId}`)
       .on(
         'postgres_changes',
@@ -342,13 +407,47 @@ export default function StudyGroupRoom() {
           table: 'group_chat_messages',
           filter: `group_id=eq.${currentGroupId}`,
         },
-        (payload) => {
+        async (payload) => {
           const incomingRow = payload.new as SupabaseChatMessageRow
+
+          // If sender profile is not in cache, fetch it
+          if (
+            incomingRow.sender_id &&
+            !profilesCacheRef.current.has(incomingRow.sender_id) &&
+            incomingRow.sender_id !== currentUser?.id
+          ) {
+            try {
+              const { data: p } = await supabase
+                .from('profiles')
+                .select('id, name')
+                .eq('id', incomingRow.sender_id)
+                .maybeSingle()
+
+              if (p) {
+                const initials = p.name
+                  ? p.name
+                      .split(' ')
+                      .map((s: string) => s[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase()
+                  : 'RB'
+                profilesCacheRef.current.set(p.id, {
+                  name: p.name || 'Rekan Belajar',
+                  avatar: initials,
+                })
+              }
+            } catch (err) {
+              console.warn('Gagal memuat profil pengirim realtime:', err)
+            }
+          }
+
           const currentMembers = useGroupStore.getState().activeGroup?.members || []
           const formattedMsg = mapSupabaseRowToMessage(
             incomingRow,
             currentUser?.id,
-            currentMembers
+            currentMembers,
+            profilesCacheRef.current
           )
           setMessages((prev) => {
             if (prev.some((m) => m.id === formattedMsg.id)) return prev
@@ -362,7 +461,7 @@ export default function StudyGroupRoom() {
           event: 'UPDATE',
           schema: 'public',
           table: 'group_chat_messages',
-          filter: `group_id=eq.${activeGroup.id}`,
+          filter: `group_id=eq.${currentGroupId}`,
         },
         (payload) => {
           const updatedRow = payload.new as SupabaseChatMessageRow
@@ -386,11 +485,35 @@ export default function StudyGroupRoom() {
         }
       })
 
+    // 3. Setup Realtime Channel for member updates (new joins, leaves, status changes)
+    const membersChannel = supabase
+      .channel(`room-members:${currentGroupId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'study_group_members',
+          filter: `group_id=eq.${currentGroupId}`,
+        },
+        () => {
+          if (currentUser?.id) {
+            void fetchMyGroups(currentUser.id)
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('Realtime channel error on room-members:', currentGroupId)
+        }
+      })
+
     return () => {
       isMounted = false
-      void supabase.removeChannel(channel)
+      void supabase.removeChannel(chatChannel)
+      void supabase.removeChannel(membersChannel)
     }
-  }, [activeGroup?.id, currentUser?.id])
+  }, [activeGroup?.id, currentUser?.id, currentUser?.name, fetchMyGroups])
 
   async function handleCopyCode() {
     if (!joinCode) return
@@ -521,7 +644,7 @@ export default function StudyGroupRoom() {
         setChatError(error.message)
       } else if (data) {
         const currentMembers = useGroupStore.getState().activeGroup?.members || []
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers)
+        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers, profilesCacheRef.current)
         setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
       }
     } catch (err) {
@@ -561,7 +684,7 @@ export default function StudyGroupRoom() {
         setChatError(error.message)
       } else if (data) {
         const currentMembers = useGroupStore.getState().activeGroup?.members || []
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers)
+        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers, profilesCacheRef.current)
         setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
       }
     } catch (err) {
@@ -600,7 +723,7 @@ export default function StudyGroupRoom() {
         setChatError(error.message)
       } else if (data) {
         const currentMembers = useGroupStore.getState().activeGroup?.members || []
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers)
+        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers, profilesCacheRef.current)
         setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
       }
     } catch (err) {
@@ -638,7 +761,7 @@ export default function StudyGroupRoom() {
         setChatError(error.message)
       } else if (data) {
         const currentMembers = useGroupStore.getState().activeGroup?.members || []
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers)
+        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers, profilesCacheRef.current)
         setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
       }
     } catch (err) {
@@ -674,7 +797,7 @@ export default function StudyGroupRoom() {
         setChatError(error.message)
       } else if (data) {
         const currentMembers = useGroupStore.getState().activeGroup?.members || []
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers)
+        const formatted = mapSupabaseRowToMessage(data, currentUser.id, currentMembers, profilesCacheRef.current)
         setMessages((prev) => {
           if (prev.some((m) => m.id === formatted.id)) return prev
           return [...prev, formatted]
@@ -980,6 +1103,14 @@ export default function StudyGroupRoom() {
                         isOwn ? 'justify-end text-[#757780]' : 'text-[#56638A]'
                       }`}
                     >
+                      {!isOwn && (
+                        <span
+                          className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[9px] font-extrabold text-white ${getMemberColor(message.senderName, 1)}`}
+                          title={message.senderName}
+                        >
+                          {message.senderAvatar || message.senderName.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
                       <span className="font-semibold">{message.senderName}</span>
                       <span aria-hidden="true">·</span>
                       <time>{message.time}</time>

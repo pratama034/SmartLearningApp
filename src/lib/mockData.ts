@@ -17,6 +17,7 @@ export const mockUsers = [
     major: 'Ilmu Komputer',
     university: 'Universitas Indonesia',
     streak: 3,
+    lastStudyDate: null,
     badges: ['Fokus Master', 'Awal yang Baik'],
     isPrivateProfile: false,
     role: 'mahasiswa',

@@ -3,6 +3,7 @@ import {
   BellOff,
   CheckCircle2,
   Clock3,
+  Flame,
   Loader2,
   NotebookPen,
   X,
@@ -245,8 +246,8 @@ export default function SessionSummary() {
               </>
             ) : showSuccessToast ? (
               <>
-                <CheckCircle2 size={18} aria-hidden="true" />
-                <span>Sesi berhasil disimpan!</span>
+                <Flame size={18} className="fill-white text-white animate-bounce" aria-hidden="true" />
+                <span>Sesi disimpan! Streak diperbarui 🔥</span>
               </>
             ) : (
               <span>Simpan Refleksi & Kembali ke Dashboard</span>

@@ -194,6 +194,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
       }
 
+      // Update streak belajar di profil pengguna
+      try {
+        await useAuthStore.getState().recordSessionCompletionForStreak()
+      } catch (streakErr) {
+        console.warn('Gagal memperbarui streak belajar:', streakErr)
+      }
+
       // Jika berhasil disimpan, pastikan status timer kembali ke idle
       get().resetSession()
     } catch (error) {

@@ -9,6 +9,7 @@ export interface User {
   major: string
   university: string
   streak: number
+  lastStudyDate?: string | null
   badges: string[]
   isPrivateProfile: boolean
   role?: UserRole

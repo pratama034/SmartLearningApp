@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import StudyGroupRoom from './components/group/StudyGroupRoom'
+import Auth from './pages/Auth'
 import CoFocus from './pages/CoFocus'
 import Dashboard from './pages/Dashboard'
 import FocusMode from './pages/FocusMode'
@@ -91,6 +92,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/auth" element={<Auth />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />

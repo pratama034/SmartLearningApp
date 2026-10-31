@@ -1,7 +1,8 @@
 import {
   BarChart3,
   BookOpen,
-  CloudDrizzle,
+  Cloud,
+  CloudCheck,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -97,15 +98,31 @@ function Brand() {
 }
 
 function SyncIndicator({ compact = false }: { compact?: boolean }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+
+  if (isAuthenticated) {
+    return (
+      <span
+        role="status"
+        title="Terhubung ke database Supabase Cloud"
+        className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 shadow-2xs"
+      >
+        <CloudCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+        <span className={compact ? 'hidden min-[380px]:inline' : ''}>Tersimpan di Cloud</span>
+        {compact && <span className="sr-only min-[380px]:hidden">Tersimpan di Cloud</span>}
+      </span>
+    )
+  }
+
   return (
     <span
       role="status"
-      title="Semua data disimpan di perangkat ini (localStorage)"
-      className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
+      title="Sesi lokal / offline"
+      className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 shadow-2xs"
     >
-      <CloudDrizzle className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className={compact ? 'hidden min-[380px]:inline' : ''}>Tersimpan Lokal</span>
-      {compact && <span className="sr-only min-[380px]:hidden">Tersimpan Lokal</span>}
+      <Cloud className="h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
+      <span className={compact ? 'hidden min-[380px]:inline' : ''}>Mode Lokal</span>
+      {compact && <span className="sr-only min-[380px]:hidden">Mode Lokal</span>}
     </span>
   )
 }
@@ -131,16 +148,8 @@ export default function Layout() {
       <header className="fixed inset-x-0 top-0 z-50 border-b border-[#DFE4F1]/70 bg-white/90 pt-[env(safe-area-inset-top)] shadow-[0_1px_8px_rgba(29,54,104,0.04)] backdrop-blur-xl lg:hidden">
         <div className="flex h-14 items-center justify-between px-4">
           <Brand />
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <SyncIndicator compact />
-            <button
-              type="button"
-              aria-label="Pengaturan"
-              onClick={() => navigate('/settings')}
-              className="grid h-11 w-11 place-items-center rounded-full text-[#44464F] transition hover:bg-[#F6F7FC] hover:text-[#1D3668]"
-            >
-              <Settings size={20} strokeWidth={1.8} />
-            </button>
             <button
               type="button"
               onClick={() => navigate('/settings')}

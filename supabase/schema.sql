@@ -25,7 +25,8 @@ create table public.profiles (
   nim text not null default '',
   major text not null default 'Teknik Informatika',
   university text not null default 'Universitas Indonesia',
-  streak integer not null default 3,
+  streak integer not null default 0,
+  last_study_date date,
   badges text[] not null default array['Fokus Master', 'Awal yang Baik']::text[],
   is_private_profile boolean not null default false,
   has_seen_onboarding boolean not null default false,
@@ -35,6 +36,9 @@ create table public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Pastikan kolom last_study_date tersedia untuk database yang sudah running
+alter table public.profiles add column if not exists last_study_date date;
 
 -- Trigger otomatis membuat baris di profiles saat user baru Register (signUp)
 create or replace function public.handle_new_user()

@@ -268,9 +268,16 @@ export default function CoFocus() {
               role="switch"
               aria-checked={isSharing}
               onClick={() => setIsSharing((current) => !current)}
-              className={`relative h-[26px] w-12 shrink-0 rounded-full transition focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 ${isSharing ? 'bg-[#1D3668]' : 'bg-[#DFE4F1]'}`}
+              className={`relative inline-flex h-[26px] w-12 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 ${
+                isSharing ? 'bg-[#1D3668]' : 'bg-[#DFE4F1]'
+              }`}
             >
-              <span className={`absolute top-[3px] h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${isSharing ? 'translate-x-[25px]' : 'translate-x-[3px]'}`} />
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+                  isSharing ? 'translate-x-[25px]' : 'translate-x-[3px]'
+                }`}
+              />
             </button>
           </div>
 
