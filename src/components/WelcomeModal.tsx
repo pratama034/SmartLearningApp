@@ -22,7 +22,7 @@ const features: { icon: LucideIcon; title: string; description: string; tone: st
   {
     icon: UsersRound,
     title: 'Co-Focus bersama Teman',
-    description: 'Gabung ruang belajar pakai kode 6 karakter, maksimal 6 orang.',
+    description: 'Gabung ruang belajar pakai kode 6 karakter, maksimal 10 orang.',
     tone: 'bg-[#D6F0DE] text-[#17623A]',
   },
 ]

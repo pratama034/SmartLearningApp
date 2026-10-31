@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { BackHandler, SafeAreaView, StatusBar, StyleSheet } from 'react-native';
+import { BackHandler, Platform, SafeAreaView, StatusBar, StyleSheet } from 'react-native';
 import { WebView, type WebViewNavigation } from 'react-native-webview';
 
 export default function App() {
@@ -48,6 +48,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F4FA', // Warna kanvas klasik Smart Focus
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
   },
   webview: {
     flex: 1,

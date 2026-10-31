@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   Check,
   CheckCheck,
@@ -9,13 +10,16 @@ import {
   Image as ImageIcon,
   Lightbulb,
   Loader2,
+  LogOut,
   MessageSquareText,
   Paperclip,
   PlusCircle,
   Reply,
   Send,
+  ShieldCheck,
   Trash2,
   Upload,
+  UserMinus,
   UsersRound,
   X,
 } from 'lucide-react'
@@ -285,6 +289,9 @@ export default function StudyGroupRoom() {
   const groups = useGroupStore((state) => state.groups)
   const fetchMyGroups = useGroupStore((state) => state.fetchMyGroups)
   const setActiveGroup = useGroupStore((state) => state.setActiveGroup)
+  const kickMember = useGroupStore((state) => state.kickMember)
+  const deleteGroup = useGroupStore((state) => state.deleteGroup)
+  const leaveGroup = useGroupStore((state) => state.leaveGroup)
   const isGroupsLoading = useGroupStore((state) => state.isLoading)
 
   // Target group ID from route or store
@@ -297,6 +304,12 @@ export default function StudyGroupRoom() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoadingMessages, setIsLoadingMessages] = useState(true)
   const [chatError, setChatError] = useState<string | null>(null)
+
+  // Confirmation Modals State
+  const [confirmKickTarget, setConfirmKickTarget] = useState<GroupMemberItem | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const [isProcessingAction, setIsProcessingAction] = useState(false)
 
   const [draft, setDraft] = useState('')
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
@@ -321,8 +334,14 @@ export default function StudyGroupRoom() {
     groupMembersRef.current = groupMembers
   }, [groupMembers])
   const joinCode = currentGroup?.joinCode || ''
-  const maxMembers = currentGroup?.maxMembers || 6
+  const maxMembers = currentGroup?.maxMembers && currentGroup.maxMembers >= 10 ? currentGroup.maxMembers : 10
   const remainingSlots = Math.max(0, maxMembers - groupMembers.length)
+
+  // Check if current user is the host/creator of this room
+  const isHost = Boolean(
+    (currentUser?.id && currentGroup?.hostId === currentUser.id) ||
+    groupMembers.some((m) => m.userId === currentUser?.id && m.isHost)
+  )
 
   // Auto-scroll to bottom on messages change
   useEffect(() => {
@@ -408,12 +427,17 @@ export default function StudyGroupRoom() {
         })
 
         if (isMounted) {
+          const effectiveMax = gData.max_members && gData.max_members >= 10 ? gData.max_members : 10
+          if (gData.max_members && gData.max_members < 10) {
+            void supabase.from('study_groups').update({ max_members: 10 }).eq('id', gData.id)
+          }
+
           setStandaloneGroup({
             id: gData.id,
             name: gData.name,
             description: gData.description || '',
             joinCode: gData.join_code,
-            maxMembers: gData.max_members || 6,
+            maxMembers: effectiveMax,
             hostId: gData.host_id,
             members: mappedMembers,
             createdAt: gData.created_at,
@@ -629,7 +653,7 @@ export default function StudyGroupRoom() {
         }
       })
 
-    // 3. Realtime Subscription for member changes
+    // 3. Realtime Subscription for member changes & kick
     const membersChannelName = `room-members:${targetGroupId}`
     const membersChannel = supabase
       .channel(membersChannelName)
@@ -641,10 +665,37 @@ export default function StudyGroupRoom() {
           table: 'study_group_members',
           filter: `group_id=eq.${targetGroupId}`,
         },
-        () => {
+        (payload) => {
+          // If current user was removed/kicked, redirect to cofocus
+          if (
+            payload.eventType === 'DELETE' &&
+            payload.old &&
+            (payload.old as { user_id?: string }).user_id === currentUser?.id
+          ) {
+            navigate('/cofocus')
+            return
+          }
           if (currentUser?.id) {
             void fetchMyGroups(currentUser.id)
           }
+        }
+      )
+      .subscribe()
+
+    // 4. Realtime Subscription for room deletion by host
+    const groupChannelName = `room-group:${targetGroupId}`
+    const groupChannel = supabase
+      .channel(groupChannelName)
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'study_groups',
+          filter: `id=eq.${targetGroupId}`,
+        },
+        () => {
+          navigate('/cofocus')
         }
       )
       .subscribe()
@@ -654,8 +705,9 @@ export default function StudyGroupRoom() {
       isMounted = false
       void supabase.removeChannel(chatChannel)
       void supabase.removeChannel(membersChannel)
+      void supabase.removeChannel(groupChannel)
     }
-  }, [targetGroupId, currentUser?.id, currentUser?.name, fetchMyGroups])
+  }, [targetGroupId, currentUser?.id, currentUser?.name, fetchMyGroups, navigate])
 
   // Copy join code helper
   async function handleCopyCode() {
@@ -678,6 +730,68 @@ export default function StudyGroupRoom() {
       setTimeout(() => setCopiedCode(false), 2000)
     } catch (err) {
       console.warn('Gagal menyalin kode ke clipboard:', err)
+    }
+  }
+
+  // Admin Kick Member
+  async function handleConfirmKick() {
+    if (!confirmKickTarget?.userId || !targetGroupId) return
+    setIsProcessingAction(true)
+    try {
+      const res = await kickMember(targetGroupId, confirmKickTarget.userId)
+      if (!res.success) {
+        setChatError(res.error || 'Gagal mengeluarkan anggota.')
+      } else {
+        setConfirmKickTarget(null)
+        if (currentUser?.id) {
+          void fetchMyGroups(currentUser.id)
+        }
+      }
+    } catch (err) {
+      console.error(err)
+      setChatError('Terjadi kesalahan saat mengeluarkan anggota.')
+    } finally {
+      setIsProcessingAction(false)
+    }
+  }
+
+  // Admin Delete Room
+  async function handleConfirmDelete() {
+    if (!targetGroupId) return
+    setIsProcessingAction(true)
+    try {
+      const res = await deleteGroup(targetGroupId)
+      if (!res.success) {
+        setChatError(res.error || 'Gagal menghapus ruang belajar.')
+      } else {
+        setShowDeleteConfirm(false)
+        navigate('/cofocus')
+      }
+    } catch (err) {
+      console.error(err)
+      setChatError('Terjadi kesalahan saat menghapus ruang belajar.')
+    } finally {
+      setIsProcessingAction(false)
+    }
+  }
+
+  // Member Leave Room
+  async function handleConfirmLeave() {
+    if (!targetGroupId) return
+    setIsProcessingAction(true)
+    try {
+      const res = await leaveGroup(targetGroupId)
+      if (!res.success) {
+        setChatError(res.error || 'Gagal keluar dari ruang belajar.')
+      } else {
+        setShowLeaveConfirm(false)
+        navigate('/cofocus')
+      }
+    } catch (err) {
+      console.error(err)
+      setChatError('Terjadi kesalahan saat keluar dari ruang belajar.')
+    } finally {
+      setIsProcessingAction(false)
     }
   }
 
@@ -1028,8 +1142,8 @@ export default function StudyGroupRoom() {
         aria-hidden="true"
       />
 
-      {/* 1. Header Atas (Native Chat Navbar - WhatsApp/Telegram Style) */}
-      <header className="h-16 shrink-0 bg-white border-b border-[#DFE4F1] px-3 sm:px-6 flex items-center justify-between z-20 shadow-[0_2px_4px_rgba(29,54,104,0.03)]">
+      {/* 1. Header Atas (Aman dari Notch / Camera Cutout via safe-area-inset & min-height) */}
+      <header className="shrink-0 bg-white border-b border-[#DFE4F1] px-3 sm:px-6 pt-[max(env(safe-area-inset-top,0px),0.75rem)] pb-2.5 min-h-[calc(4rem+env(safe-area-inset-top,0px))] flex items-center justify-between z-20 shadow-[0_2px_4px_rgba(29,54,104,0.03)]">
         <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
           {/* Tombol Kembali ke Co-Focus */}
           <button
@@ -1047,7 +1161,7 @@ export default function StudyGroupRoom() {
             type="button"
             onClick={() => setShowMembersDrawer(true)}
             className="flex items-center gap-2.5 text-left group min-w-0 focus:outline-none"
-            title="Klik untuk melihat anggota ruangan"
+            title="Klik untuk melihat anggota & pengaturan ruangan"
           >
             <div className="relative">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#1D3668] text-xs font-extrabold text-white shadow-xs group-hover:bg-[#162B54] transition">
@@ -1057,9 +1171,16 @@ export default function StudyGroupRoom() {
             </div>
 
             <div className="min-w-0">
-              <h1 className="truncate text-sm sm:text-base font-bold text-[#1F2C4F] group-hover:text-[#1D3668] transition">
-                {groupName}
-              </h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="truncate text-sm sm:text-base font-bold text-[#1F2C4F] group-hover:text-[#1D3668] transition">
+                  {groupName}
+                </h1>
+                {isHost && (
+                  <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-[#E1EAF8] px-2 py-0.2 text-[10px] font-extrabold text-[#1D3668]">
+                    <ShieldCheck size={11} /> Admin
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-[#56638A] leading-tight flex items-center gap-1.5 truncate">
                 <span>{groupMembers.length} / {maxMembers} Anggota</span>
                 <span>·</span>
@@ -1091,7 +1212,7 @@ export default function StudyGroupRoom() {
             type="button"
             onClick={() => setShowMembersDrawer((prev) => !prev)}
             aria-label="Info & Anggota Kelompok"
-            title="Lihat Anggota & Panduan Berkas"
+            title="Lihat Anggota & Pengaturan Ruangan"
             className={`grid h-9 w-9 place-items-center rounded-xl border transition active:scale-95 ${
               showMembersDrawer
                 ? 'border-[#1D3668] bg-[#E1EAF8] text-[#1D3668]'
@@ -1124,7 +1245,7 @@ export default function StudyGroupRoom() {
         <div className="flex justify-center mb-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-[#DFE4F1] bg-white/90 backdrop-blur-xs px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#757780] shadow-2xs">
             <span className="h-1.5 w-1.5 rounded-full bg-[#17623A]" />
-            Ruang Diskusi Realtime · Maks 6 Anggota
+            Ruang Diskusi Realtime · Maks {maxMembers} Anggota
           </span>
         </div>
 
@@ -1385,8 +1506,8 @@ export default function StudyGroupRoom() {
         </div>
       )}
 
-      {/* 4. Input Bar Paling Bawah (WhatsApp / Telegram Style) */}
-      <footer className="shrink-0 bg-white border-t border-[#DFE4F1] p-2.5 sm:p-3 z-20 shadow-[0_-2px_10px_rgba(29,54,104,0.03)]">
+      {/* 4. Input Bar Paling Bawah (Aman dari Nav Bar / Home Indicator) */}
+      <footer className="shrink-0 bg-white border-t border-[#DFE4F1] p-2.5 sm:p-3 pb-[max(calc(0.65rem+env(safe-area-inset-bottom,0px)),0.65rem)] z-20 shadow-[0_-2px_10px_rgba(29,54,104,0.03)]">
         {/* Banner Membalas Pesan */}
         {replyingTo && (
           <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-[#DFE4F1] bg-[#E1EAF8]/70 px-3 py-1.5 text-xs text-[#1D3668]">
@@ -1461,14 +1582,14 @@ export default function StudyGroupRoom() {
         </form>
       </footer>
 
-      {/* 5. Slide-Over Drawer: Informasi & Anggota Kelompok */}
+      {/* 5. Slide-Over Drawer: Informasi & Anggota Kelompok (Aman dari Notch Atas & Bawah) */}
       {showMembersDrawer && (
         <div
           className="fixed inset-0 z-40 flex justify-end bg-[#0B1A3D]/40 backdrop-blur-xs transition-opacity"
           onClick={() => setShowMembersDrawer(false)}
         >
           <div
-            className="w-full max-w-sm sm:w-96 bg-white h-full shadow-2xl flex flex-col p-5 overflow-y-auto animate-in slide-in-from-right duration-200"
+            className="w-full max-w-sm sm:w-96 bg-white h-full shadow-2xl flex flex-col p-5 pt-[max(calc(1.25rem+env(safe-area-inset-top,0px)),1.5rem)] pb-[max(calc(1.25rem+env(safe-area-inset-bottom,0px)),1.5rem)] overflow-y-auto animate-in slide-in-from-right duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[#DFE4F1] pb-3">
@@ -1489,7 +1610,14 @@ export default function StudyGroupRoom() {
 
             {/* Room Summary Card */}
             <div className="mt-4 rounded-xl border border-[#DFE4F1] bg-[#F6F7FC] p-4">
-              <h4 className="text-sm font-extrabold text-[#1F2C4F]">{groupName}</h4>
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="text-sm font-extrabold text-[#1F2C4F]">{groupName}</h4>
+                {isHost && (
+                  <span className="rounded-full bg-[#1D3668] px-2 py-0.5 text-[9px] font-extrabold text-white shrink-0">
+                    Host / Admin
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-xs text-[#56638A]">
                 {currentGroup?.description || 'Ruang kolaborasi terpadu untuk berdiskusi materi kuliah dan berbagi tugas.'}
               </p>
@@ -1525,10 +1653,13 @@ export default function StudyGroupRoom() {
               <ul className="space-y-2">
                 {groupMembers.map((member, index) => {
                   const isFocus = member.status === 'fokus'
+                  const isSelf = member.userId === currentUser?.id
+                  const canKick = isHost && !isSelf && !member.isHost
+
                   return (
                     <li
                       key={member.id}
-                      className="flex items-center gap-3 rounded-xl border border-[#DFE4F1] bg-white p-2.5 shadow-2xs"
+                      className="flex items-center gap-2.5 rounded-xl border border-[#DFE4F1] bg-white p-2.5 shadow-2xs"
                     >
                       <span
                         className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-extrabold text-white ${getMemberColor(member.name, index)}`}
@@ -1546,18 +1677,33 @@ export default function StudyGroupRoom() {
                         </p>
                         <p className="truncate text-[11px] text-[#56638A]">{member.course}</p>
                       </div>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          isFocus ? 'bg-[#FCDDE6] text-[#8E1744]' : 'bg-[#FDEBC8] text-[#7A4B00]'
-                        }`}
-                      >
-                        {isFocus ? 'Fokus' : 'Istirahat'}
-                      </span>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            isFocus ? 'bg-[#FCDDE6] text-[#8E1744]' : 'bg-[#FDEBC8] text-[#7A4B00]'
+                          }`}
+                        >
+                          {isFocus ? 'Fokus' : 'Istirahat'}
+                        </span>
+
+                        {/* Tombol Kick Khusus Admin Ruangan */}
+                        {canKick && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmKickTarget(member)}
+                            title={`Keluarkan ${member.name} dari ruangan`}
+                            className="grid h-7 w-7 place-items-center rounded-lg border border-red-200 text-red-600 transition hover:bg-red-50 hover:text-red-700 active:scale-95"
+                          >
+                            <UserMinus size={13} />
+                          </button>
+                        )}
+                      </div>
                     </li>
                   )
                 })}
 
-                {/* Empty slot placeholders */}
+                {/* Empty slot placeholders up to maxMembers (10) */}
                 {Array.from({ length: remainingSlots }).map((_, i) => (
                   <li
                     key={`slot-${i}`}
@@ -1579,6 +1725,157 @@ export default function StudyGroupRoom() {
               <p className="text-[11px] leading-relaxed opacity-90">
                 Gunakan menu lampiran untuk mengirim berkas <strong>PDF (.pdf)</strong>, <strong>Word (.docx)</strong>, dan gambar <strong>JPG (.jpg)</strong> langsung ke forum belajar.
               </p>
+            </div>
+
+            {/* Tindakan Manajemen Ruangan (Admin: Hapus Ruangan | Anggota: Keluar Ruangan) */}
+            <div className="mt-5 pt-3 border-t border-[#DFE4F1]">
+              {isHost ? (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2.5 px-3 text-xs font-bold text-red-700 transition hover:bg-red-100 active:scale-98"
+                  >
+                    <Trash2 size={15} />
+                    <span>Hapus Ruang Belajar (Admin)</span>
+                  </button>
+                  <p className="mt-1.5 text-center text-[10px] text-[#757780]">
+                    Sebagai pembuat grup, Anda dapat membubarkan ruang ini agar tidak membebani database.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowLeaveConfirm(true)}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-[#DFE4F1] bg-white py-2.5 px-3 text-xs font-bold text-[#56638A] transition hover:bg-red-50 hover:text-red-700 hover:border-red-200 active:scale-98"
+                >
+                  <LogOut size={15} />
+                  <span>Keluar dari Ruang Belajar</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi 1: Kick Anggota (Admin) */}
+      {confirmKickTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-xs"
+          onClick={() => !isProcessingAction && setConfirmKickTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-[#DFE4F1] bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-600">
+              <UserMinus size={24} />
+            </div>
+            <h3 className="mt-4 text-center text-base font-extrabold text-[#1F2C4F]">
+              Keluarkan Anggota?
+            </h3>
+            <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
+              Apakah Anda yakin ingin mengeluarkan <strong>{confirmKickTarget.name}</strong> dari ruang belajar ini? Mereka dapat bergabung kembali jika memasukkan kode ruangan.
+            </p>
+            <div className="mt-6 flex gap-2">
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={() => setConfirmKickTarget(null)}
+                className="flex-1 rounded-xl border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={handleConfirmKick}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-xs font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {isProcessingAction ? 'Mengeluarkan...' : 'Ya, Keluarkan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi 2: Hapus Ruangan (Admin) */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-xs"
+          onClick={() => !isProcessingAction && setShowDeleteConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-red-200 bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-600">
+              <AlertTriangle size={24} />
+            </div>
+            <h3 className="mt-4 text-center text-base font-extrabold text-[#1F2C4F]">
+              Hapus Ruang Belajar?
+            </h3>
+            <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
+              Tindakan ini akan <strong>menghapus permanen</strong> ruang belajar "{groupName}" beserta seluruh riwayat obrolan dan dokumen di dalamnya. Semua anggota akan dikeluarkan.
+            </p>
+            <div className="mt-6 flex gap-2">
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 rounded-xl border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={handleConfirmDelete}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-xs font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {isProcessingAction ? 'Menghapus...' : 'Ya, Hapus Ruang'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi 3: Keluar Ruangan (Anggota Biasa) */}
+      {showLeaveConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-xs"
+          onClick={() => !isProcessingAction && setShowLeaveConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-[#DFE4F1] bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-700">
+              <LogOut size={24} />
+            </div>
+            <h3 className="mt-4 text-center text-base font-extrabold text-[#1F2C4F]">
+              Keluar dari Ruangan?
+            </h3>
+            <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
+              Apakah Anda yakin ingin keluar dari "{groupName}"? Anda bisa bergabung kembali nanti menggunakan kode ruangan jika slot masih tersedia.
+            </p>
+            <div className="mt-6 flex gap-2">
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={() => setShowLeaveConfirm(false)}
+                className="flex-1 rounded-xl border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={handleConfirmLeave}
+                className="flex-1 rounded-xl bg-[#1D3668] py-2.5 text-xs font-bold text-white transition hover:bg-[#162B54] disabled:opacity-50"
+              >
+                {isProcessingAction ? 'Memproses...' : 'Ya, Keluar'}
+              </button>
             </div>
           </div>
         </div>

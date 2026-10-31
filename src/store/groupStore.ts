@@ -63,7 +63,9 @@ interface GroupState {
   createGroup: (name: string) => Promise<{ success: boolean; group?: StudyGroupItem; error?: string }>
   joinGroup: (code: string) => Promise<{ success: boolean; group?: StudyGroupItem; error?: string }>
   setActiveGroup: (groupId: string) => void
-  leaveGroup: (groupId: string) => Promise<void>
+  leaveGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
+  kickMember: (groupId: string, targetUserId: string) => Promise<{ success: boolean; error?: string }>
+  deleteGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export const useGroupStore = create<GroupState>((set, get) => ({
@@ -161,12 +163,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             }
           })
 
+        const effectiveMaxMembers = g.max_members && g.max_members >= 10 ? g.max_members : 10
+        if (g.max_members && g.max_members < 10) {
+          void supabase.from('study_groups').update({ max_members: 10 }).eq('id', g.id)
+        }
+
         return {
           id: g.id,
           name: g.name,
           description: g.description || '',
           joinCode: g.join_code,
-          maxMembers: g.max_members || 6,
+          maxMembers: effectiveMaxMembers,
           hostId: g.host_id,
           members: groupMemberList,
           createdAt: g.created_at,
@@ -204,14 +211,14 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     const newJoinCode = generateUniqueCode()
 
     try {
-      // 1. Insert ke study_groups
+      // 1. Insert ke study_groups (kapasitas 10 anggota)
       const { data: newGroupRow, error: groupErr } = await supabase
         .from('study_groups')
         .insert({
           name: trimmedName,
           description: `Dibuat oleh ${currentUser.name || 'Anda'}`,
           join_code: newJoinCode,
-          max_members: 6,
+          max_members: 10,
           host_id: currentUser.id,
         })
         .select('*')
@@ -262,7 +269,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         name: newGroupRow.name,
         description: newGroupRow.description || '',
         joinCode: newGroupRow.join_code,
-        maxMembers: newGroupRow.max_members || 6,
+        maxMembers: newGroupRow.max_members || 10,
         hostId: currentUser.id,
         members: [hostItem],
         createdAt: newGroupRow.created_at,
@@ -325,7 +332,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       if (insertMemberErr) {
         const errLower = insertMemberErr.message.toLowerCase()
         if (errLower.includes('penuh') || errLower.includes('maks') || insertMemberErr.code === 'P0001') {
-          return { success: false, error: 'Maaf, ruang belajar sudah penuh (Maks 6 orang)' }
+          return { success: false, error: 'Maaf, ruang belajar sudah penuh (Maks 10 orang)' }
         }
         // Jika user sudah terdaftar di grup ini (unique constraint uq_group_user)
         if (
@@ -364,18 +371,73 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
   leaveGroup: async (groupId: string) => {
     const currentUser = useAuthStore.getState().user
-    if (!currentUser?.id) return
+    if (!currentUser?.id) {
+      return { success: false, error: 'Silakan masuk terlebih dahulu.' }
+    }
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('study_group_members')
         .delete()
         .eq('group_id', groupId)
         .eq('user_id', currentUser.id)
 
+      if (error) throw error
+
       await get().fetchMyGroups(currentUser.id)
+      return { success: true }
     } catch (err) {
       console.error('SUPABASE ERROR (leaveGroup):', err)
+      const message = err instanceof Error ? err.message : 'Gagal keluar dari ruang belajar.'
+      return { success: false, error: message }
+    }
+  },
+
+  kickMember: async (groupId: string, targetUserId: string) => {
+    const currentUser = useAuthStore.getState().user
+    if (!currentUser?.id) {
+      return { success: false, error: 'Silakan masuk terlebih dahulu.' }
+    }
+
+    try {
+      const { error } = await supabase
+        .from('study_group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('user_id', targetUserId)
+
+      if (error) throw error
+
+      await get().fetchMyGroups(currentUser.id)
+      return { success: true }
+    } catch (err) {
+      console.error('SUPABASE ERROR (kickMember):', err)
+      const message = err instanceof Error ? err.message : 'Gagal mengeluarkan anggota dari ruang belajar.'
+      return { success: false, error: message }
+    }
+  },
+
+  deleteGroup: async (groupId: string) => {
+    const currentUser = useAuthStore.getState().user
+    if (!currentUser?.id) {
+      return { success: false, error: 'Silakan masuk terlebih dahulu.' }
+    }
+
+    try {
+      const { error } = await supabase
+        .from('study_groups')
+        .delete()
+        .eq('id', groupId)
+        .eq('host_id', currentUser.id)
+
+      if (error) throw error
+
+      await get().fetchMyGroups(currentUser.id)
+      return { success: true }
+    } catch (err) {
+      console.error('SUPABASE ERROR (deleteGroup):', err)
+      const message = err instanceof Error ? err.message : 'Gagal menghapus ruang belajar.'
+      return { success: false, error: message }
     }
   },
 }))

@@ -149,14 +149,14 @@ create index idx_focus_sessions_user on public.focus_sessions (user_id, created_
 
 
 -- ====================================================================
--- 5. TABEL STUDY_GROUPS (Ruang Belajar Co-Focus dengan Kode 6 Karakter)
+-- 5. TABEL STUDY_GROUPS (Ruang Belajar Co-Focus dengan Kode 6 Karakter, Maks 10 Orang)
 -- ====================================================================
 create table public.study_groups (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   description text not null default '',
   join_code varchar(6) not null unique,
-  max_members integer not null default 6 check (max_members <= 6),
+  max_members integer not null default 10 check (max_members <= 10),
   host_id uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
@@ -165,7 +165,7 @@ create index idx_study_groups_join_code on public.study_groups (upper(join_code)
 
 
 -- ====================================================================
--- 6. TABEL STUDY_GROUP_MEMBERS (Anggota Ruang Belajar, Maks 6 Orang)
+-- 6. TABEL STUDY_GROUP_MEMBERS (Anggota Ruang Belajar, Maks 10 Orang)
 -- ====================================================================
 create table public.study_group_members (
   id uuid primary key default gen_random_uuid(),
@@ -180,14 +180,14 @@ create table public.study_group_members (
 
 create index idx_group_members_group on public.study_group_members (group_id);
 
--- Trigger pembatas maksimal 6 orang per grup
+-- Trigger pembatas maksimal 10 orang per grup (atau sesuai sg.max_members)
 create or replace function public.check_max_group_members()
 returns trigger as $$
 declare
   member_count integer;
   max_allowed integer;
 begin
-  select count(*), coalesce(max(sg.max_members), 6)
+  select count(*), coalesce(max(sg.max_members), 10)
   into member_count, max_allowed
   from public.study_group_members sgm
   join public.study_groups sg on sg.id = new.group_id
@@ -290,6 +290,14 @@ create policy "Pengguna login dapat membuat study_groups"
   on public.study_groups for insert
   with check (auth.uid() = host_id);
 
+create policy "Host dapat menghapus study_groups miliknya"
+  on public.study_groups for delete
+  using (auth.uid() = host_id);
+
+create policy "Host dapat mengubah study_groups miliknya"
+  on public.study_groups for update
+  using (auth.uid() = host_id);
+
 create policy "Semua pengguna login dapat melihat anggota grup"
   on public.study_group_members for select
   using (auth.role() = 'authenticated');
@@ -302,9 +310,15 @@ create policy "Pengguna dapat mengubah status atau keluar grup"
   on public.study_group_members for update
   using (auth.uid() = user_id);
 
-create policy "Pengguna dapat keluar dari grup"
+create policy "Pengguna dapat keluar atau dikeluarkan oleh host"
   on public.study_group_members for delete
-  using (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1 from public.study_groups sg
+      where sg.id = study_group_members.group_id and sg.host_id = auth.uid()
+    )
+  );
 
 -- Kebijakan Group Chat Messages
 create policy "Anggota grup dapat membaca pesan chat"
