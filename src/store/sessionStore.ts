@@ -9,7 +9,10 @@ export type SessionCompletionStatus = 'completed' | 'ended_early'
 
 export interface HeldNotification {
   id: string
+  title?: string
   text: string
+  appName?: string
+  packageName?: string
   receivedAt: string
 }
 

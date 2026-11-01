@@ -4,15 +4,39 @@ import android.content.ComponentName
 import android.content.Intent
 import android.provider.Settings
 import android.text.TextUtils
+import com.facebook.react.bridge.ReactContext
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class FocusEnforcementModule : Module() {
+
+  companion object {
+    var reactContext: ReactContext? = null
+  }
+
   override fun definition() = ModuleDefinition {
     Name("FocusEnforcement")
 
+    OnCreate {
+      val ctx = appContext.reactContext
+      reactContext = ctx
+      FocusNotificationListener.reactContext = ctx
+    }
+
     Function("setFocusEnabled") { enabled: Boolean, blockedPackages: List<String> ->
-      appContext.reactContext?.let { FocusPrefs.setFocus(it, enabled, blockedPackages) }
+      appContext.reactContext?.let {
+        reactContext = it
+        FocusNotificationListener.reactContext = it
+        FocusPrefs.setFocus(it, enabled, blockedPackages)
+      }
+    }
+
+    Function("setBlockedPackages") { blockedPackages: List<String> ->
+      appContext.reactContext?.let {
+        reactContext = it
+        FocusNotificationListener.reactContext = it
+        FocusPrefs.setFocus(it, true, blockedPackages)
+      }
     }
 
     Function("isFocusEnabled") {

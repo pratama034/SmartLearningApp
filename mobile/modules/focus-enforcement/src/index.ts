@@ -13,6 +13,7 @@ export type HeldNotification = {
 type FocusEnforcementModule = {
   isNativeAvailable(): boolean
   setFocusEnabled(enabled: boolean, blockedPackages: string[]): void
+  setBlockedPackages(blockedPackages: string[]): void
   isFocusEnabled(): boolean
   isAccessibilityEnabled(): boolean
   isNotificationAccessEnabled(): boolean
@@ -38,6 +39,7 @@ const nativeModule = getNativeModule()
 const FocusEnforcement: FocusEnforcementModule = {
   isNativeAvailable: () => nativeModule !== null,
   setFocusEnabled: (enabled, blockedPackages) => nativeModule?.setFocusEnabled(enabled, blockedPackages),
+  setBlockedPackages: (blockedPackages) => nativeModule?.setBlockedPackages(blockedPackages),
   isFocusEnabled: () => nativeModule?.isFocusEnabled() ?? false,
   isAccessibilityEnabled: () => nativeModule?.isAccessibilityEnabled() ?? false,
   isNotificationAccessEnabled: () => nativeModule?.isNotificationAccessEnabled() ?? false,

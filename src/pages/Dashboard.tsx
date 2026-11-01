@@ -387,6 +387,46 @@ export default function Dashboard() {
     }
   }, [authUser?.id, fetchStudyBlocks, fetchMyGroups])
 
+  // Dengarkan event notifikasi yang dicegat secara realtime dari Native Android WebView
+  useEffect(() => {
+    function handleNewBlockedNotif(event: Event) {
+      const customEvent = event as CustomEvent<{
+        id?: string
+        packageName?: string
+        appName?: string
+        title?: string
+        text?: string
+        receivedAt?: number | string
+      }>
+      const detail = customEvent.detail
+      if (!detail) return
+
+      const title = detail.title || 'Tidak Diketahui'
+      const text = detail.text || ''
+      const appName =
+        detail.appName ||
+        (detail.packageName ? detail.packageName.substring(detail.packageName.lastIndexOf('.') + 1) : 'Aplikasi')
+      const formattedReceivedAt =
+        typeof detail.receivedAt === 'number'
+          ? new Date(detail.receivedAt).toISOString()
+          : detail.receivedAt || new Date().toISOString()
+
+      useSessionStore.getState().addHeldNotification({
+        id: detail.id || globalThis.crypto?.randomUUID?.() || `notif-${Date.now()}`,
+        title,
+        text: text ? `${title}: ${text}` : title,
+        appName,
+        packageName: detail.packageName,
+        receivedAt: formattedReceivedAt,
+      })
+    }
+
+    window.addEventListener('NATIVE_NOTIFICATION_BLOCKED', handleNewBlockedNotif)
+    return () => {
+      window.removeEventListener('NATIVE_NOTIFICATION_BLOCKED', handleNewBlockedNotif)
+    }
+  }, [])
+
   const todayBlocks = blocks
     .filter((block) => block.date === today)
     .sort((a, b) => (a.startTime ?? a.start_time).localeCompare(b.startTime ?? b.start_time))

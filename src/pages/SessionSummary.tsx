@@ -197,14 +197,31 @@ export default function SessionSummary() {
         <h2 className="text-[18px] font-bold leading-6 text-[#1F2C4F]">Notifikasi yang ditunda</h2>
         <div className="mt-4 space-y-2.5">
           {summary.heldNotifications.length ? (
-            summary.heldNotifications.map((notification) => (
-              <article
-                key={notification.id}
-                className="rounded-xl border border-[#FCDDE6] bg-[#FFF7F8] p-3 text-sm font-medium text-[#1F2C4F]"
-              >
-                {notification.text}
-              </article>
-            ))
+            summary.heldNotifications.map((notification) => {
+              const displayTitle = notification.title || notification.appName || 'Notifikasi Masuk'
+              const displayText = notification.text.startsWith(displayTitle + ': ')
+                ? notification.text.slice(displayTitle.length + 2)
+                : notification.text
+
+              return (
+                <article
+                  key={notification.id}
+                  className="rounded-xl border border-[#FCDDE6] bg-[#FFF7F8] p-3 text-sm font-medium text-[#1F2C4F]"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-[#1F2C4F]">{displayTitle}</span>
+                    {notification.appName && (
+                      <span className="rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
+                        {notification.appName}
+                      </span>
+                    )}
+                  </div>
+                  {displayText && (
+                    <p className="mt-1 text-xs text-[#56638A]">{displayText}</p>
+                  )}
+                </article>
+              )
+            })
           ) : (
             <p className="rounded-xl bg-[#F6F7FC] p-4 text-sm text-[#56638A]">
               Tidak ada notifikasi yang perlu ditinjau.

@@ -1,18 +1,21 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
   BackHandler,
+  DeviceEventEmitter,
   Linking,
   NativeModules,
   Platform,
   SafeAreaView,
   StatusBar,
   StyleSheet,
+  ToastAndroid,
 } from 'react-native';
 import {
   WebView,
   type WebViewMessageEvent,
   type WebViewNavigation,
 } from 'react-native-webview';
+import FocusEnforcement from './modules/focus-enforcement/src';
 
 interface KotlinNotificationBlockerModule {
   setBlockedPackages?: (packages: string[]) => void;
@@ -53,6 +56,32 @@ export default function App() {
     };
   }, [canGoBack]);
 
+  // Dengarkan event realtime 'onNotificationBlocked' dari Kotlin dan suntikkan ke WebView
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      'onNotificationBlocked',
+      (data) => {
+        try {
+          const payload = typeof data === 'string' ? JSON.parse(data) : data;
+          const jsCode = `(function() {
+            try {
+              window.dispatchEvent(new CustomEvent('NATIVE_NOTIFICATION_BLOCKED', { detail: ${JSON.stringify(payload)} }));
+            } catch (e) {
+              console.error('Error dispatching NATIVE_NOTIFICATION_BLOCKED:', e);
+            }
+          })(); true;`;
+          webViewRef.current?.injectJavaScript(jsCode);
+        } catch (err) {
+          console.warn('[WebView Bridge] Gagal menyuntikkan onNotificationBlocked ke WebView:', err);
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   // Menangkap pesan dari WebView (contoh: SET_BLOCKED_APPS untuk Notification Blocker)
   const handleWebViewMessage = (event: WebViewMessageEvent) => {
     try {
@@ -69,9 +98,18 @@ export default function App() {
           (pkg): pkg is string => typeof pkg === 'string'
         );
 
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.setBlockedPackages(blockedPackages);
+        }
+
         if (MyKotlinModule?.setBlockedPackages) {
           MyKotlinModule.setBlockedPackages(blockedPackages);
         }
+
+        ToastAndroid.show(
+          'Sistem HP: Aturan blokir notifikasi berhasil diterapkan!',
+          ToastAndroid.SHORT
+        );
       }
     } catch (err) {
       console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);

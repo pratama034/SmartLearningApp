@@ -85,6 +85,45 @@ export default function FocusMode() {
     return () => window.clearInterval(intervalId)
   }, [addHeldNotification, status])
 
+  useEffect(() => {
+    function handleNewBlockedNotif(event: Event) {
+      const customEvent = event as CustomEvent<{
+        id?: string
+        packageName?: string
+        appName?: string
+        title?: string
+        text?: string
+        receivedAt?: number | string
+      }>
+      const detail = customEvent.detail
+      if (!detail) return
+
+      const title = detail.title || 'Tidak Diketahui'
+      const text = detail.text || ''
+      const appName =
+        detail.appName ||
+        (detail.packageName ? detail.packageName.substring(detail.packageName.lastIndexOf('.') + 1) : 'Aplikasi')
+      const formattedReceivedAt =
+        typeof detail.receivedAt === 'number'
+          ? new Date(detail.receivedAt).toISOString()
+          : detail.receivedAt || new Date().toISOString()
+
+      addHeldNotification({
+        id: detail.id || globalThis.crypto?.randomUUID?.() || `notif-${Date.now()}`,
+        title,
+        text: text ? `${title}: ${text}` : title,
+        appName,
+        packageName: detail.packageName,
+        receivedAt: formattedReceivedAt,
+      })
+    }
+
+    window.addEventListener('NATIVE_NOTIFICATION_BLOCKED', handleNewBlockedNotif)
+    return () => {
+      window.removeEventListener('NATIVE_NOTIFICATION_BLOCKED', handleNewBlockedNotif)
+    }
+  }, [addHeldNotification])
+
   const todayBlocks = blocks
     .filter((block) => block.date === todayDate())
     .sort((first, second) => first.start_time.localeCompare(second.start_time))
@@ -254,14 +293,35 @@ export default function FocusMode() {
         </div>
         <p className="mt-1 text-[13px] leading-[19px] text-[#56638A]">Notifikasi non-penting akan muncul di sini selama sesi fokus berjalan.</p>
         <div className="mt-5 space-y-2.5">
-          {heldNotifications.length ? heldNotifications.map((notification) => (
-            <article key={notification.id} className="rounded-xl border border-[#FCDDE6] bg-[#FFF7F8] p-3">
-              <p className="text-[13px] font-semibold leading-[18px] text-[#1F2C4F]">{notification.text}</p>
-              <time className="mt-1 block text-[11px] text-[#8E1744]" dateTime={notification.receivedAt}>
-                Ditunda pada {new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(notification.receivedAt))}
-              </time>
-            </article>
-          )) : (
+          {heldNotifications.length ? heldNotifications.map((notification) => {
+            const displayTitle = notification.title || notification.appName || 'Notifikasi Masuk'
+            const displayText = notification.text.startsWith(displayTitle + ': ')
+              ? notification.text.slice(displayTitle.length + 2)
+              : notification.text
+
+            return (
+              <article key={notification.id} className="rounded-xl border border-[#FCDDE6] bg-[#FFF7F8] p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-bold leading-[18px] text-[#1F2C4F]">
+                    {displayTitle}
+                  </span>
+                  {notification.appName && (
+                    <span className="rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
+                      {notification.appName}
+                    </span>
+                  )}
+                </div>
+                {displayText && (
+                  <p className="mt-1 text-[12px] font-medium leading-[17px] text-[#56638A]">
+                    {displayText}
+                  </p>
+                )}
+                <time className="mt-1.5 block text-[11px] text-[#8E1744]" dateTime={notification.receivedAt}>
+                  Ditunda pada {new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(notification.receivedAt))}
+                </time>
+              </article>
+            )
+          }) : (
             <div className="rounded-xl bg-[#F6F7FC] p-4 text-sm leading-5 text-[#56638A]">Belum ada notifikasi yang ditunda.</div>
           )}
         </div>
