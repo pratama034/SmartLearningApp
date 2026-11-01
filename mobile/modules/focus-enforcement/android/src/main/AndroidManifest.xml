@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
   <application>
     <service
       android:name="com.smartlearning.focus.FocusAccessibilityService"
@@ -15,8 +17,8 @@
     </service>
     <service
       android:name="com.smartlearning.focus.FocusNotificationListener"
-      android:label="SmartLearning Notification Hold"
-      android:exported="false"
+      android:label="Smart Focus Blocker"
+      android:exported="true"
       android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
       <intent-filter>
         <action android:name="android.service.notification.NotificationListenerService" />

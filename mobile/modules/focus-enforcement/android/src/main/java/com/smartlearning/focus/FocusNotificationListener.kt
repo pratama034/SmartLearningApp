@@ -9,7 +9,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import org.json.JSONObject
 import java.util.UUID
 
-class FocusNotificationListener : NotificationListenerService() {
+open class FocusNotificationListener : NotificationListenerService() {
 
   companion object {
     var reactContext: ReactContext? = null

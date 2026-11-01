@@ -51,6 +51,7 @@ interface SessionState {
   error: string | null
   clearError: () => void
   startSession: (block: StudyBlock) => void
+  startFocus: (block: StudyBlock) => void
   pauseSession: () => void
   resumeSession: () => void
   stopFocus: () => Promise<string | null>
@@ -95,15 +96,33 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       error: null,
     })
 
-    // Update status anggota di ruang Co-Focus menjadi 'fokus'
-    const currentUserId = useAuthStore.getState().user?.id
-    if (currentUserId) {
-      useGroupStore.getState().syncUserStatus(currentUserId, 'fokus')
-      void supabase
-        .from('study_group_members')
-        .update({ status: 'fokus' })
-        .eq('user_id', currentUserId)
+    // TAHAP 1: Update status anggota di ruang Co-Focus menjadi 'fokus'
+    const updateMemberToFocus = async () => {
+      try {
+        let currentUserId = useAuthStore.getState().user?.id
+        if (!currentUserId) {
+          const { data } = await supabase.auth.getUser()
+          currentUserId = data.user?.id
+        }
+        if (currentUserId) {
+          useGroupStore.getState().syncUserStatus(currentUserId, 'fokus')
+          const { error } = await supabase
+            .from('study_group_members')
+            .update({ status: 'fokus' })
+            .eq('user_id', currentUserId)
+          if (error) {
+            console.warn('[startFocus] Gagal update status fokus di study_group_members:', error.message)
+          }
+        }
+      } catch (err) {
+        console.warn('[startFocus] Error update study_group_members:', err)
+      }
     }
+    void updateMemberToFocus()
+  },
+
+  startFocus: (block) => {
+    get().startSession(block)
   },
 
   pauseSession: () =>
@@ -114,6 +133,33 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   stopFocus: async () => {
     const state = get()
+
+    // TAHAP 1: Kembalikan status user di study_group_members ke 'istirahat' agar tidak pernah nyangkut
+    let currentUserId = useAuthStore.getState().user?.id
+    if (!currentUserId) {
+      try {
+        const { data } = await supabase.auth.getUser()
+        currentUserId = data.user?.id
+      } catch {
+        // ignore
+      }
+    }
+
+    if (currentUserId) {
+      useGroupStore.getState().syncUserStatus(currentUserId, 'istirahat')
+      try {
+        const { error } = await supabase
+          .from('study_group_members')
+          .update({ status: 'istirahat' })
+          .eq('user_id', currentUserId)
+        if (error) {
+          console.warn('[stopFocus] Gagal update status istirahat di study_group_members:', error.message)
+        }
+      } catch (err) {
+        console.warn('[stopFocus] Error update study_group_members:', err)
+      }
+    }
+
     if (!state.activeBlock) {
       return state.lastSavedSessionId
     }
@@ -149,19 +195,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       lastSavedSessionId: null,
     })
 
-    const currentUserId = useAuthStore.getState().user?.id
     if (!currentUserId) {
       return null
     }
 
-    // 2. Kembalikan status user di study_group_members agar tidak nyangkut "Sedang Fokus"
-    useGroupStore.getState().syncUserStatus(currentUserId, 'istirahat')
-    void supabase
-      .from('study_group_members')
-      .update({ status: 'istirahat' })
-      .eq('user_id', currentUserId)
-
-    // 3. Tambahkan poin streak langsung saat stopFocus (tanpa menunggu form refleksi)
+    // 2. Tambahkan poin streak langsung saat stopFocus (tanpa menunggu form refleksi)
     try {
       await useAuthStore.getState().recordSessionCompletionForStreak()
     } catch (streakErr) {
@@ -237,7 +275,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     void get().stopFocus()
   },
 
-  resetSession: () =>
+  resetSession: () => {
+    const currentUserId = useAuthStore.getState().user?.id
+    if (currentUserId) {
+      useGroupStore.getState().syncUserStatus(currentUserId, 'istirahat')
+      void supabase
+        .from('study_group_members')
+        .update({ status: 'istirahat' })
+        .eq('user_id', currentUserId)
+    }
     set({
       activeBlock: null,
       status: 'idle',
@@ -248,7 +294,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       lastSavedSessionId: null,
       isSaving: false,
       error: null,
-    }),
+    })
+  },
 
   addHeldNotification: (notification) =>
     set((state) => ({

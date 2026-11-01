@@ -78,7 +78,14 @@ export default function CoFocus() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'study_group_members' },
-        () => {
+        (payload) => {
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            useGroupStore
+              .getState()
+              .handleMemberUpdate(
+                payload.new as { id?: string; user_id?: string; group_id?: string; status?: string; course?: string | null }
+              )
+          }
           void fetchMyGroups(user.id)
         }
       )
@@ -629,13 +636,10 @@ export default function CoFocus() {
         <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {currentMembers.map((member, index) => {
             const isCurrentUser = member.userId === user?.id
-            const effectiveStatus = isCurrentUser
-              ? sessionStatus === 'running' || sessionStatus === 'paused'
-                ? 'fokus'
-                : 'istirahat'
-              : member.status
+            // Membaca status murni dari database (Source of Truth), tanpa ditimpa state lokal
+            const isFocusing = member.status === 'fokus'
             const statusLabel: 'Sedang Fokus' | 'Istirahat' =
-              effectiveStatus === 'fokus' ? 'Sedang Fokus' : 'Istirahat'
+              isFocusing ? 'Sedang Fokus' : 'Istirahat'
             const badgeStyle = statusStyles[statusLabel]
             const canKick = isHost && !member.isHost && !isCurrentUser
             const displayedCourse =

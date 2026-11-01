@@ -62,7 +62,11 @@ class FocusEnforcementModule : Module() {
       val context = appContext.reactContext ?: return@Function false
       val expected = ComponentName(context, FocusNotificationListener::class.java).flattenToString()
       val listeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-      !listeners.isNullOrBlank() && listeners.contains(expected)
+      if (listeners.isNullOrBlank()) return@Function false
+      listeners.contains(expected) ||
+        listeners.contains("${context.packageName}/.FocusNotificationListener") ||
+        listeners.contains("${context.packageName}/com.smartlearning.app.FocusNotificationListener") ||
+        listeners.contains("FocusNotificationListener")
     }
 
     Function("openAccessibilitySettings") {

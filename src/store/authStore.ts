@@ -91,16 +91,37 @@ function mapProfileToUser(
   const backup = getStoredStreakBackup(userId)
   const dbStreak = typeof profile?.streak === 'number' ? profile.streak : 0
   const rawLastDate = profile?.last_study_date ?? backup.lastDate ?? null
-  const rawStreak = dbStreak > 0 ? dbStreak : backup.streak
 
-  const evaluation = evaluateStreak(rawStreak, rawLastDate)
+  // PENTING: Jika pengguna baru / belum pernah menyelesaikan sesi fokus (totalSessions === 0),
+  // streak HARUS 0 dan badges wajib ['Pemula Fokus'], tidak boleh mewarisi default tiruan.
+  const isNewAccountWithoutSessions = totalSessions === 0
+  const effectiveStreak = isNewAccountWithoutSessions ? 0 : (dbStreak > 0 ? dbStreak : backup.streak)
+  const effectiveLastDate = isNewAccountWithoutSessions ? null : rawLastDate
+
+  const evaluation = evaluateStreak(effectiveStreak, effectiveLastDate)
   const computedBadges = calculateAchievementBadges(evaluation.currentStreak, totalSessions)
 
   // Simpan backup ke localStorage agar tidak pernah hilang saat refresh
   saveStoredStreakBackup(userId, evaluation.currentStreak, evaluation.lastStudyDate)
 
-  // Jika streak bolong lebih dari 1 hari (needsReset), sinkronkan reset streak ke 0 di database
-  if (evaluation.needsReset && profile?.id) {
+  // Self-healing: jika akun baru di database Supabase sempat ter-insert streak > 0 oleh trigger lama,
+  // otomatis koreksi kembali menjadi 0 di Supabase.
+  if (
+    isNewAccountWithoutSessions &&
+    profile?.id &&
+    (dbStreak > 0 || (profile.badges && profile.badges.includes('Fokus Master')))
+  ) {
+    void supabase
+      .from('profiles')
+      .update({
+        streak: 0,
+        last_study_date: null,
+        badges: ['Pemula Fokus'],
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', profile.id)
+  } else if (evaluation.needsReset && profile?.id) {
+    // Jika streak bolong lebih dari 1 hari (needsReset), sinkronkan reset streak ke 0 di database
     void supabase
       .from('profiles')
       .update({

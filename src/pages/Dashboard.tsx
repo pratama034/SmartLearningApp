@@ -32,12 +32,11 @@ import { useSessionStore, type FocusStatus } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
 import type { StudyBlock } from '../types'
 
-const currentUser = mockUsers[0]
-const timeZone = currentUser.timezone || 'Asia/Jakarta'
+const defaultTimeZone = 'Asia/Jakarta'
 
 function getTodayDate() {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
+    timeZone: defaultTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -50,7 +49,7 @@ function getTodayDate() {
 function getGreeting() {
   const hour = Number(
     new Intl.DateTimeFormat('id-ID', {
-      timeZone,
+      timeZone: defaultTimeZone,
       hour: '2-digit',
       hourCycle: 'h23',
     }).format(new Date()),
@@ -64,7 +63,7 @@ function getGreeting() {
 
 function getDisplayDate() {
   return new Intl.DateTimeFormat('id-ID', {
-    timeZone,
+    timeZone: defaultTimeZone,
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -249,6 +248,7 @@ export default function Dashboard() {
   const [liveFocusedPeers, setLiveFocusedPeers] = useState<
     Array<{ id: string; name: string; course: string }>
   >([])
+  const [rekanSedangFokus, setRekanSedangFokus] = useState(0)
   const [pendingTasksCount, setPendingTasksCount] = useState(0)
 
   useEffect(() => {
@@ -280,6 +280,7 @@ export default function Dashboard() {
           if (isMounted) {
             setLivePeerTotalCount(0)
             setLiveFocusedPeers([])
+            setRekanSedangFokus(0)
           }
           return
         }
@@ -309,9 +310,14 @@ export default function Dashboard() {
           .filter(([, info]) => info.status === 'fokus')
           .map(([peerId]) => peerId)
 
+        if (isMounted) {
+          setRekanSedangFokus(focusedUserIds.length)
+        }
+
         if (focusedUserIds.length === 0) {
           if (isMounted) {
             setLiveFocusedPeers([])
+            setRekanSedangFokus(0)
           }
           return
         }
@@ -339,6 +345,7 @@ export default function Dashboard() {
 
         if (isMounted) {
           setLiveFocusedPeers(focusedList)
+          setRekanSedangFokus(focusedList.length)
         }
       } catch (err) {
         console.warn('[Dashboard Realtime] Gagal menyinkronkan statistik live:', err)
@@ -355,7 +362,37 @@ export default function Dashboard() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'study_group_members' },
-        () => {
+        (payload) => {
+          // Tangani event UPDATE secara instan
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            const updatedRow = payload.new as {
+              id?: string
+              user_id?: string
+              group_id?: string
+              status?: string
+              course?: string | null
+            }
+            const peerUserId = updatedRow.user_id
+            if (peerUserId && peerUserId !== uid) {
+              setLiveFocusedPeers((prev) => {
+                let next = [...prev]
+                if (updatedRow.status === 'fokus') {
+                  if (!next.some((p) => p.id === peerUserId)) {
+                    next.push({
+                      id: peerUserId,
+                      name: 'Rekan Kelompok',
+                      course: updatedRow.course || 'Mahasiswa',
+                    })
+                  }
+                } else {
+                  next = next.filter((p) => p.id !== peerUserId)
+                }
+                setRekanSedangFokus(next.length)
+                return next
+              })
+            }
+          }
+          // Re-calculate menyeluruh dari database Supabase
           void syncDashboardRealtimeStats()
           void fetchMyGroups(uid)
         }
@@ -446,6 +483,7 @@ export default function Dashboard() {
   const focusedFriends = authUser?.id
     ? liveFocusedPeers
     : mockFocusedFriends.map((u) => ({ id: u.id, name: u.name, course: u.program_studi || 'Mahasiswa' }))
+  const effectiveFocusedCount = authUser?.id ? rekanSedangFokus : focusedFriends.length
 
   const heldNotificationCount =
     heldNotifications.length > 0
@@ -692,7 +730,7 @@ export default function Dashboard() {
           eyebrow="Live"
           label="Co-focus"
           value={totalCoFocusPeers}
-          detail={`${focusedFriends.length} sedang fokus`}
+          detail={`${effectiveFocusedCount} sedang fokus`}
         />
       </section>
 
@@ -759,13 +797,13 @@ export default function Dashboard() {
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2.5 w-2.5">
-                  {focusedFriends.length > 0 && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#17623A] opacity-70" />}
-                  <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${focusedFriends.length ? 'bg-[#17623A]' : 'bg-[#C4C6D0]'}`} />
+                  {effectiveFocusedCount > 0 && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#17623A] opacity-70" />}
+                  <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${effectiveFocusedCount ? 'bg-[#17623A]' : 'bg-[#C4C6D0]'}`} />
                 </span>
                 <h2 className="text-base font-bold leading-[22px] text-[#1F2C4F]">Rekan Sedang Fokus</h2>
               </div>
               <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-[#757780]">
-                {focusedFriends.length} aktif
+                {effectiveFocusedCount} aktif
               </span>
             </div>
 
@@ -805,11 +843,11 @@ export default function Dashboard() {
 
             <button
               type="button"
-              disabled={focusedFriends.length === 0}
+              disabled={effectiveFocusedCount === 0}
               className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#E1EAF8] text-sm font-bold text-[#1D3668] transition-colors hover:bg-[#D7E4F6] active:bg-[#1D3668] active:text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               <UsersRound size={17} />
-              {focusedFriends.length ? 'Kirim Sapaan Hening' : 'Belum ada rekan aktif'}
+              {effectiveFocusedCount ? 'Kirim Sapaan Hening' : 'Belum ada rekan aktif'}
             </button>
           </section>
 

@@ -86,16 +86,21 @@ function withFocusServices(config) {
 
       // 2. Notification Listener Service
       const notificationServiceName = 'com.smartlearning.focus.FocusNotificationListener'
-      const hasNotificationService = app.service.some(
-        (s) => s && s.$ && s.$['android:name'] === notificationServiceName
+      let notifService = app.service.find(
+        (s) =>
+          s &&
+          s.$ &&
+          (s.$['android:name'] === notificationServiceName ||
+            s.$['android:name'] === '.FocusNotificationListener' ||
+            s.$['android:name'] === 'com.smartlearning.app.FocusNotificationListener')
       )
 
-      if (!hasNotificationService) {
-        app.service.push({
+      if (!notifService) {
+        notifService = {
           $: {
             'android:name': notificationServiceName,
-            'android:label': 'SmartLearning Notification Hold',
-            'android:exported': 'false',
+            'android:label': 'Smart Focus Blocker',
+            'android:exported': 'true',
             'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
           },
           'intent-filter': [
@@ -109,7 +114,13 @@ function withFocusServices(config) {
               ],
             },
           ],
-        })
+        }
+        app.service.push(notifService)
+      } else {
+        notifService.$['android:name'] = notificationServiceName
+        notifService.$['android:label'] = 'Smart Focus Blocker'
+        notifService.$['android:exported'] = 'true'
+        notifService.$['android:permission'] = 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'
       }
 
       // Ensure <uses-permission> array exists
@@ -122,6 +133,7 @@ function withFocusServices(config) {
         'android.permission.SYSTEM_ALERT_WINDOW',
         'android.permission.BIND_ACCESSIBILITY_SERVICE',
         'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
+        'android.permission.POST_NOTIFICATIONS',
       ]
 
       for (const perm of requiredPermissions) {

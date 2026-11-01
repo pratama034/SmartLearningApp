@@ -432,7 +432,7 @@ export default function StudyGroupRoom() {
             userId: m.user_id,
             name: isCurrentUser ? `${name} (Anda)` : name,
             avatar: initials,
-            status: m.status === 'istirahat' ? 'istirahat' : 'fokus',
+            status: m.status === 'fokus' ? 'fokus' : 'istirahat',
             course: m.course || prof?.major || 'Mahasiswa',
             isHost: m.role === 'owner',
           }
@@ -687,6 +687,38 @@ export default function StudyGroupRoom() {
             navigate('/cofocus')
             return
           }
+
+          // Sinkronisasi status/anggota realtime saat ada UPDATE
+          if (payload.eventType === 'UPDATE' && payload.new) {
+            const updatedRow = payload.new as {
+              id?: string
+              user_id?: string
+              group_id?: string
+              status?: string
+              course?: string | null
+            }
+            useGroupStore.getState().handleMemberUpdate(updatedRow)
+
+            // Perbarui state standaloneGroup agar kartu anggota di ruang ini langsung ter-render realtime
+            setStandaloneGroup((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                members: prev.members.map((m) => {
+                  const isMatch =
+                    (updatedRow.id && m.id === updatedRow.id) ||
+                    (updatedRow.user_id && m.userId === updatedRow.user_id)
+                  if (!isMatch) return m
+                  return {
+                    ...m,
+                    status: updatedRow.status === 'fokus' ? 'fokus' : 'istirahat',
+                    course: updatedRow.course || m.course,
+                  }
+                }),
+              }
+            })
+          }
+
           if (currentUser?.id) {
             void fetchMyGroups(currentUser.id)
           }

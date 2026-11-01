@@ -68,6 +68,13 @@ interface GroupState {
   deleteGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => void
   syncUserCourse: (userId: string, course: string, name?: string) => void
+  handleMemberUpdate: (payload: {
+    id?: string
+    user_id?: string
+    group_id?: string
+    status?: string
+    course?: string | null
+  }) => void
 }
 
 export const useGroupStore = create<GroupState>((set, get) => ({
@@ -450,19 +457,55 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   },
 
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => {
+    get().handleMemberUpdate({ user_id: userId, status })
+  },
+
+  handleMemberUpdate: (payload: {
+    id?: string
+    user_id?: string
+    group_id?: string
+    status?: string
+    course?: string | null
+  }) => {
+    const targetUserId = payload.user_id
+    const targetMemberId = payload.id
+    const newStatus: 'fokus' | 'istirahat' = payload.status === 'fokus' ? 'fokus' : 'istirahat'
+    const newCourse = payload.course
+
     set((state) => {
-      const updatedGroups = state.groups.map((g) => ({
-        ...g,
-        members: g.members.map((m) => (m.userId === userId ? { ...m, status } : m)),
-      }))
-      const updatedActive = state.activeGroup
+      const updatedGroups = state.groups.map((g) => {
+        if (payload.group_id && g.id !== payload.group_id) {
+          return g
+        }
+        return {
+          ...g,
+          members: g.members.map((m) => {
+            const isMatch = (targetMemberId && m.id === targetMemberId) || (targetUserId && m.userId === targetUserId)
+            if (!isMatch) return m
+            return {
+              ...m,
+              status: newStatus,
+              ...(newCourse ? { course: newCourse } : {}),
+            }
+          }),
+        }
+      })
+
+      const updatedActive = state.activeGroup && (!payload.group_id || state.activeGroup.id === payload.group_id)
         ? {
             ...state.activeGroup,
-            members: state.activeGroup.members.map((m) =>
-              m.userId === userId ? { ...m, status } : m
-            ),
+            members: state.activeGroup.members.map((m) => {
+              const isMatch = (targetMemberId && m.id === targetMemberId) || (targetUserId && m.userId === targetUserId)
+              if (!isMatch) return m
+              return {
+                ...m,
+                status: newStatus,
+                ...(newCourse ? { course: newCourse } : {}),
+              }
+            }),
           }
-        : null
+        : state.activeGroup
+
       return { groups: updatedGroups, activeGroup: updatedActive }
     })
   },
