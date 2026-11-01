@@ -84,45 +84,6 @@ function withFocusServices(config) {
         })
       }
 
-      // 2. Notification Listener Service
-      const notificationServiceName = 'com.smartlearning.focus.FocusNotificationListener'
-      let notifService = app.service.find(
-        (s) =>
-          s &&
-          s.$ &&
-          (s.$['android:name'] === notificationServiceName ||
-            s.$['android:name'] === '.FocusNotificationListener' ||
-            s.$['android:name'] === 'com.smartlearning.app.FocusNotificationListener')
-      )
-
-      if (!notifService) {
-        notifService = {
-          $: {
-            'android:name': notificationServiceName,
-            'android:label': 'Smart Focus Blocker',
-            'android:exported': 'true',
-            'android:permission': 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE',
-          },
-          'intent-filter': [
-            {
-              action: [
-                {
-                  $: {
-                    'android:name': 'android.service.notification.NotificationListenerService',
-                  },
-                },
-              ],
-            },
-          ],
-        }
-        app.service.push(notifService)
-      } else {
-        notifService.$['android:name'] = notificationServiceName
-        notifService.$['android:label'] = 'Smart Focus Blocker'
-        notifService.$['android:exported'] = 'true'
-        notifService.$['android:permission'] = 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'
-      }
-
       // Ensure <uses-permission> array exists
       if (!androidManifest.manifest['uses-permission'] || !Array.isArray(androidManifest.manifest['uses-permission'])) {
         androidManifest.manifest['uses-permission'] = []

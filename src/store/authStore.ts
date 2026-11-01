@@ -269,6 +269,7 @@ interface AuthState {
   initializeAuth: () => Promise<void>
   setHasSeenOnboarding: () => void
   login: (email: string, password: string) => Promise<void>
+  signInWithGoogle: () => Promise<void>
   register: (email: string, password: string, name: string) => Promise<string>
   updateProfile: (updatedData: Partial<User>) => Promise<void>
   recordSessionCompletionForStreak: () => Promise<{ newStreak: number; isFirstToday: boolean; todayStr: string }>
@@ -421,6 +422,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  signInWithGoogle: async () => {
+    set({ authError: null, isLoading: true })
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      })
+      if (error) {
+        throw new Error(error.message)
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Gagal terhubung dengan layanan Google Auth.'
+      set({ authError: message, isLoading: false })
+      throw new Error(message)
+    }
+  },
+
   register: async (email, password, name) => {
     set({ authError: null })
 
@@ -441,6 +462,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       })
 
       if (error) {
+        const errorText = `${error.message || ''} ${(error as { code?: string }).code || ''}`.toLowerCase()
+        const isRateLimit =
+          error.status === 429 ||
+          errorText.includes('rate limit') ||
+          errorText.includes('rate_limit') ||
+          errorText.includes('too many') ||
+          errorText.includes('security purposes') ||
+          errorText.includes('over_email_send_rate_limit') ||
+          errorText.includes('over_request_rate_limit')
+
+        if (isRateLimit) {
+          const friendlyMessage =
+            "Sistem pendaftaran sedang padat. Silakan gunakan tombol 'Login dengan Google' atau coba beberapa saat lagi."
+          set({ authError: friendlyMessage, isLoading: false })
+          throw new Error(friendlyMessage)
+        }
+
         throw new Error(error.message)
       }
 
@@ -450,8 +488,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Kembalikan status sukses agar UI dapat menampilkan instruksi verifikasi email
       return 'check_email'
     } catch (error) {
-      const message =
+      const rawMessage =
         error instanceof Error ? error.message : 'Pendaftaran gagal. Silakan coba lagi.'
+      const rawLower = rawMessage.toLowerCase()
+      const isRateLimit =
+        rawLower.includes('rate limit') ||
+        rawLower.includes('rate_limit') ||
+        rawLower.includes('429') ||
+        rawLower.includes('too many') ||
+        rawLower.includes('security purposes') ||
+        rawLower.includes('over_email_send_rate_limit') ||
+        rawLower.includes('over_request_rate_limit')
+
+      const message = isRateLimit
+        ? "Sistem pendaftaran sedang padat. Silakan gunakan tombol 'Login dengan Google' atau coba beberapa saat lagi."
+        : rawMessage
+
       set({ authError: message, isLoading: false })
       throw new Error(message)
     }
