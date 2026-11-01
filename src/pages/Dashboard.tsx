@@ -20,7 +20,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   mockGroupMembers,
-  mockNotifications,
   mockSessions,
   mockUsers,
 } from '../lib/mockData'
@@ -414,7 +413,7 @@ export default function Dashboard() {
       useSessionStore.getState().addHeldNotification({
         id: detail.id || globalThis.crypto?.randomUUID?.() || `notif-${Date.now()}`,
         title,
-        text: text ? `${title}: ${text}` : title,
+        text,
         appName,
         packageName: detail.packageName,
         receivedAt: formattedReceivedAt,
@@ -430,13 +429,6 @@ export default function Dashboard() {
   const todayBlocks = blocks
     .filter((block) => block.date === today)
     .sort((a, b) => (a.startTime ?? a.start_time).localeCompare(b.startTime ?? b.start_time))
-  const userSessions = mockSessions
-    .filter((session) => session.user_id === currentUser.id && session.status !== 'active')
-    .sort((a, b) => b.started_at.localeCompare(a.started_at))
-  const relevantSession = userSessions[0]
-  const relevantNotifications = relevantSession
-    ? mockNotifications.filter((notification) => notification.session_id === relevantSession.id)
-    : []
   const userGroupIds = new Set(
     mockGroupMembers.filter((member) => member.user_id === currentUser.id).map((member) => member.group_id),
   )
@@ -458,9 +450,7 @@ export default function Dashboard() {
   const heldNotificationCount =
     heldNotifications.length > 0
       ? heldNotifications.length
-      : (lastSessionSummary?.heldNotifications?.length ?? 0) +
-        pendingTasksCount +
-        relevantNotifications.filter((notification) => !notification.passed).length
+      : (lastSessionSummary?.heldNotifications?.length ?? 0)
   const activeCount = todayBlocks.filter((block) => {
     const status = getBlockStatus(block, activeBlock, focusStatus)
     return status === 'active' || status === 'paused'
@@ -693,7 +683,7 @@ export default function Dashboard() {
           tone="green"
           eyebrow="Lolos"
           label="Penting"
-          value={relevantNotifications.filter((notification) => notification.passed).length}
+          value={0}
           detail="Tetap masuk"
         />
         <StatTile

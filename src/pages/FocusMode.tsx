@@ -1,16 +1,10 @@
 import { AlertCircle, CheckSquare, Clock3, Pause, Play, Square, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStudyDate } from '../data/mockData'
 import { useAuthStore } from '../store/authStore'
 import { useSessionStore } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
-
-const mockIncomingNotifications = [
-  'Pesan WhatsApp dari Budi',
-  'Email Kampus: Pengumuman',
-  'Notifikasi Instagram',
-] as const
 
 function todayDate() {
   return getStudyDate()
@@ -40,7 +34,6 @@ export default function FocusMode() {
   const heldNotifications = useSessionStore((state) => state.heldNotifications)
   const addHeldNotification = useSessionStore((state) => state.addHeldNotification)
   const tick = useSessionStore((state) => state.tick)
-  const notificationCursor = useRef(0)
 
   useEffect(() => {
     if (user?.id) {
@@ -67,24 +60,7 @@ export default function FocusMode() {
     navigate('/summary')
   }
 
-  useEffect(() => {
-    if (status !== 'running') return
-
-    const intervalId = window.setInterval(() => {
-      const text = mockIncomingNotifications[notificationCursor.current % mockIncomingNotifications.length]
-      notificationCursor.current += 1
-      if (!text.includes('Email')) {
-        addHeldNotification({
-          id: globalThis.crypto?.randomUUID?.() ?? `held-${Date.now()}-${notificationCursor.current}`,
-          text,
-          receivedAt: new Date().toISOString(),
-        })
-      }
-    }, 15_000)
-
-    return () => window.clearInterval(intervalId)
-  }, [addHeldNotification, status])
-
+  // Tangkap event notifikasi native yang diblokir secara realtime
   useEffect(() => {
     function handleNewBlockedNotif(event: Event) {
       const customEvent = event as CustomEvent<{
@@ -111,7 +87,7 @@ export default function FocusMode() {
       addHeldNotification({
         id: detail.id || globalThis.crypto?.randomUUID?.() || `notif-${Date.now()}`,
         title,
-        text: text ? `${title}: ${text}` : title,
+        text,
         appName,
         packageName: detail.packageName,
         receivedAt: formattedReceivedAt,
