@@ -67,21 +67,36 @@ export function formatLastStudyDateLabel(lastStudyDate?: string | null): string 
  * Mengevaluasi kondisi streak mahasiswa saat aplikasi dibuka / login:
  * - diff === 0: Sudah belajar hari ini (active_today)
  * - diff === 1: Kemarin belajar, hari ini belum (pending_today, pertahankan!)
- * - diff > 1 atau null: Melewatkan minimal 1 hari kemarin (broken, reset ke 0)
+ * - diff > 1: Melewatkan minimal 1 hari kemarin (broken, reset ke 0)
+ * - Jika lastStudyDate belum ada tetapi streak di DB > 0: pertahankan nilai streak dari DB
  */
 export function evaluateStreak(
   streak: number,
   lastStudyDate?: string | null
 ): StreakEvaluation {
   const todayStr = getTodayDateString()
+  const safeStreak = Math.max(0, Number(streak) || 0)
 
-  // Jika belum pernah ada tanggal belajar tercatat
+  // Jika belum ada lastStudyDate tercatat di kolom DB
   if (!lastStudyDate) {
+    if (safeStreak > 0) {
+      return {
+        status: 'active_today',
+        currentStreak: safeStreak,
+        lastStudyDate: todayStr,
+        needsReset: false,
+        diffDays: 0,
+        title: `🔥 Streak ${safeStreak} Hari Aktif!`,
+        message:
+          'Pertahankan konsistensi belajarmu setiap hari untuk meningkatkan level pencapaian.',
+      }
+    }
+
     return {
       status: 'broken',
       currentStreak: 0,
       lastStudyDate: null,
-      needsReset: streak > 0,
+      needsReset: false,
       diffDays: null,
       title: 'Mulai Nyalakan Api Streak!',
       message:
@@ -92,8 +107,8 @@ export function evaluateStreak(
   const diff = getDaysDifference(todayStr, lastStudyDate)
 
   // Kasus A: Hari ini sudah belajar
-  if (diff === 0) {
-    const validStreak = Math.max(1, streak)
+  if (diff <= 0) {
+    const validStreak = Math.max(1, safeStreak)
     return {
       status: 'active_today',
       currentStreak: validStreak,
@@ -108,13 +123,14 @@ export function evaluateStreak(
 
   // Kasus B: Kemarin belajar, hari ini belum (Streak masih hidup, perlu belajar hari ini)
   if (diff === 1) {
+    const validStreak = Math.max(1, safeStreak)
     return {
       status: 'pending_today',
-      currentStreak: Math.max(1, streak),
+      currentStreak: validStreak,
       lastStudyDate,
       needsReset: false,
       diffDays: 1,
-      title: `⚡ Pertahankan Streak ${streak} Hari!`,
+      title: `⚡ Pertahankan Streak ${validStreak} Hari!`,
       message:
         'Selesaikan minimal 1 sesi fokus hari ini sebelum pukul 23:59 agar api streak tidak padam.',
     }
@@ -125,7 +141,7 @@ export function evaluateStreak(
     status: 'broken',
     currentStreak: 0,
     lastStudyDate,
-    needsReset: streak > 0,
+    needsReset: safeStreak > 0,
     diffDays: diff,
     title: '💔 Streak Belajar Terputus',
     message:
@@ -134,18 +150,19 @@ export function evaluateStreak(
 }
 
 /**
- * Menghitung nilai streak baru ketika mahasiswa menyelesaikan sesi timer fokus.
+ * Menghitung nilai streak baru ketika mahasiswa menyelesaikan/menghentikan sesi timer fokus (stopFocus).
  */
 export function calculateNewStreakOnSessionComplete(
   currentStreak: number,
   lastStudyDate?: string | null
 ): { newStreak: number; isFirstToday: boolean; todayStr: string } {
   const todayStr = getTodayDateString()
+  const safeCurrent = Math.max(0, Number(currentStreak) || 0)
 
-  // 1. Jika hari ini sudah pernah menyelesaikan sesi, jangan gandakan streak
-  if (lastStudyDate === todayStr) {
+  // 1. Jika hari ini sudah pernah menyelesaikan sesi dan streak sudah >= 1, pertahankan (atau minimal 1)
+  if (lastStudyDate === todayStr && safeCurrent > 0) {
     return {
-      newStreak: Math.max(1, currentStreak),
+      newStreak: safeCurrent,
       isFirstToday: false,
       todayStr,
     }
@@ -156,18 +173,50 @@ export function calculateNewStreakOnSessionComplete(
     const diff = getDaysDifference(todayStr, lastStudyDate)
     if (diff === 1) {
       return {
-        newStreak: Math.max(1, (currentStreak || 0) + 1),
+        newStreak: safeCurrent + 1,
+        isFirstToday: true,
+        todayStr,
+      }
+    }
+    if (diff > 1) {
+      return {
+        newStreak: 1,
         isFirstToday: true,
         todayStr,
       }
     }
   }
 
-  // 3. Jika baru pertama kali atau sempat bolong kemarin, mulai dari 1
+  // 3. Jika belum ada lastStudyDate tetapi sudah punya streak di DB, tambahkan + 1
   return {
-    newStreak: 1,
+    newStreak: safeCurrent + 1,
     isFirstToday: true,
     todayStr,
+  }
+}
+
+/**
+ * Menghitung daftar badge pencapaian berdasarkan streak dan jumlah sesi fokus.
+ * Menggunakan urutan pengecekan kondisional (if / else if / else)
+ * dari tier tertinggi ke tier terendah agar tidak langsung melompat ke "Fokus Master".
+ */
+export function calculateAchievementBadges(streak: number, totalSessions = 0): string[] {
+  const safeStreak = Math.max(0, Number(streak) || 0)
+  const safeSessions = Math.max(0, Number(totalSessions) || 0)
+
+  // Urutan pengecekan kondisional dari Tier Tertinggi ke Tier Terendah
+  if (safeStreak >= 30 || safeSessions >= 50) {
+    return ['Fokus Master', 'Pejuang Konsisten', 'Disiplin Tinggi', 'Fokus Terlatih', 'Awal yang Baik']
+  } else if (safeStreak >= 14 || safeSessions >= 25) {
+    return ['Pejuang Konsisten', 'Disiplin Tinggi', 'Fokus Terlatih', 'Awal yang Baik']
+  } else if (safeStreak >= 7 || safeSessions >= 10) {
+    return ['Disiplin Tinggi', 'Fokus Terlatih', 'Awal yang Baik']
+  } else if (safeStreak >= 3 || safeSessions >= 3) {
+    return ['Fokus Terlatih', 'Awal yang Baik']
+  } else if (safeStreak >= 1 || safeSessions >= 1) {
+    return ['Awal yang Baik']
+  } else {
+    return ['Pemula Fokus']
   }
 }
 

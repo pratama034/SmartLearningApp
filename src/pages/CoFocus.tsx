@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useGroupStore, type GroupMemberItem } from '../store/groupStore'
 import { useSessionStore } from '../store/sessionStore'
@@ -69,8 +70,29 @@ export default function CoFocus() {
   const kickMember = useGroupStore((state) => state.kickMember)
 
   useEffect(() => {
-    if (user?.id) {
-      void fetchMyGroups(user.id)
+    if (!user?.id) return
+    void fetchMyGroups(user.id)
+
+    const channel = supabase
+      .channel(`cofocus-live:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'study_group_members' },
+        () => {
+          void fetchMyGroups(user.id)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles' },
+        () => {
+          void fetchMyGroups(user.id)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
     }
   }, [user?.id, fetchMyGroups])
 
@@ -606,10 +628,18 @@ export default function CoFocus() {
         {/* Grid slots showing member status and room limit */}
         <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {currentMembers.map((member, index) => {
-            const statusLabel: 'Sedang Fokus' | 'Istirahat' = member.status === 'fokus' ? 'Sedang Fokus' : 'Istirahat'
-            const badgeStyle = statusStyles[statusLabel]
             const isCurrentUser = member.userId === user?.id
+            const effectiveStatus = isCurrentUser
+              ? sessionStatus === 'running' || sessionStatus === 'paused'
+                ? 'fokus'
+                : 'istirahat'
+              : member.status
+            const statusLabel: 'Sedang Fokus' | 'Istirahat' =
+              effectiveStatus === 'fokus' ? 'Sedang Fokus' : 'Istirahat'
+            const badgeStyle = statusStyles[statusLabel]
             const canKick = isHost && !member.isHost && !isCurrentUser
+            const displayedCourse =
+              (isCurrentUser && user?.major) || member.course || 'Mahasiswa'
 
             return (
               <article
@@ -644,7 +674,7 @@ export default function CoFocus() {
                   </div>
                 </div>
                 <h3 className="mt-4 text-[16px] font-bold leading-[22px] text-[#1F2C4F]">{member.name}</h3>
-                <p className="mt-1 text-xs text-[#56638A]">{member.course || 'Mahasiswa'}</p>
+                <p className="mt-1 text-xs text-[#56638A]">{displayedCourse}</p>
                 <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeStyle}`}>
                   {statusLabel}
                 </span>

@@ -1,7 +1,9 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  BellOff,
   Building2,
+  Check,
   CheckCircle2,
   Flame,
   GraduationCap,
@@ -13,11 +15,87 @@ import {
   Settings as SettingsIcon,
   ShieldAlert,
   ShieldCheck,
+  Smartphone,
   User as UserIcon,
   UserRound,
 } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
+import { useGroupStore } from '../store/groupStore'
 import { formatLastStudyDateLabel } from '../lib/streak'
+
+declare global {
+  interface Window {
+    ReactNativeWebView?: {
+      postMessage: (message: string) => void
+    }
+  }
+}
+
+interface BlockableAppItem {
+  packageName: string
+  label: string
+  description: string
+  category: string
+}
+
+const BLOCKABLE_APPS: BlockableAppItem[] = [
+  {
+    packageName: 'com.whatsapp',
+    label: 'Blokir WhatsApp',
+    description: 'Tahan notifikasi obrolan pribadi dan grup non-darurat saat fokus',
+    category: 'Pesan Instan',
+  },
+  {
+    packageName: 'com.instagram.android',
+    label: 'Blokir Instagram',
+    description: 'Tahan notifikasi DM, komentar, live, dan rekomendasi Reels',
+    category: 'Media Sosial',
+  },
+  {
+    packageName: 'com.zhiliaoapp.musically',
+    label: 'Blokir TikTok',
+    description: 'Tahan notifikasi video baru, mention, dan siaran langsung',
+    category: 'Hiburan',
+  },
+  {
+    packageName: 'com.twitter.android',
+    label: 'Blokir X (Twitter)',
+    description: 'Tahan notifikasi topik hangat, balasan, dan mention linimasa',
+    category: 'Media Sosial',
+  },
+  {
+    packageName: 'org.telegram.messenger',
+    label: 'Blokir Telegram',
+    description: 'Tahan notifikasi channel publik dan grup diskusi umum',
+    category: 'Pesan Instan',
+  },
+  {
+    packageName: 'com.google.android.youtube',
+    label: 'Blokir YouTube',
+    description: 'Tahan notifikasi unggahan kreator dan rekomendasi Shorts',
+    category: 'Video',
+  },
+]
+
+const BLOCKED_APPS_STORAGE_KEY = 'smartlearning-blocked-apps'
+
+function getInitialBlockedApps(): string[] {
+  if (typeof window === 'undefined') {
+    return ['com.whatsapp', 'com.instagram.android']
+  }
+  try {
+    const raw = window.localStorage.getItem(BLOCKED_APPS_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string')
+      }
+    }
+  } catch {
+    // Abaikan error parse localStorage
+  }
+  return ['com.whatsapp', 'com.instagram.android']
+}
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -33,8 +111,10 @@ export default function Settings() {
   const [major, setMajor] = useState(user?.major || '')
   const [university, setUniversity] = useState(user?.university || '')
   const [showSuccessToast, setShowSuccessToast] = useState(false)
+  const [successToastMessage, setSuccessToastMessage] = useState('Profil berhasil diperbarui di Supabase')
   const [errorToast, setErrorToast] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [selectedApps, setSelectedApps] = useState<string[]>(getInitialBlockedApps)
 
   if (user?.id !== prevUserId) {
     setPrevUserId(user?.id)
@@ -72,6 +152,10 @@ export default function Settings() {
         major: major.trim(),
         university: university.trim(),
       })
+      if (user?.id) {
+        useGroupStore.getState().syncUserCourse(user.id, major.trim(), name.trim())
+      }
+      setSuccessToastMessage('Profil berhasil diperbarui di Supabase')
       setShowSuccessToast(true)
     } catch (error) {
       setErrorToast(
@@ -86,12 +170,45 @@ export default function Settings() {
     setErrorToast(null)
     try {
       await togglePrivacy(!isPrivateProfile)
+      setSuccessToastMessage('Pengaturan privasi berhasil diperbarui')
       setShowSuccessToast(true)
     } catch (error) {
       setErrorToast(
         error instanceof Error ? error.message : 'Gagal memperbarui pengaturan privasi.'
       )
     }
+  }
+
+  function handleToggleBlockedApp(packageName: string) {
+    setSelectedApps((prev) =>
+      prev.includes(packageName)
+        ? prev.filter((pkg) => pkg !== packageName)
+        : [...prev, packageName]
+    )
+  }
+
+  function handleSaveBlockedApps() {
+    setErrorToast(null)
+    try {
+      window.localStorage.setItem(BLOCKED_APPS_STORAGE_KEY, JSON.stringify(selectedApps))
+    } catch {
+      // Abaikan error penyimpanan lokal
+    }
+
+    // Kirim daftar package aplikasi yang diblokir ke React Native WebView Bridge
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({
+          type: 'SET_BLOCKED_APPS',
+          data: selectedApps,
+        })
+      )
+    }
+
+    setSuccessToastMessage(
+      `Pengaturan Notification Blocker (${selectedApps.length} aplikasi) berhasil disimpan!`
+    )
+    setShowSuccessToast(true)
   }
 
   async function handleLogout() {
@@ -123,7 +240,7 @@ export default function Settings() {
         >
           <div className="flex items-center gap-3">
             <CheckCircle2 size={20} className="shrink-0 text-[#17623A]" aria-hidden="true" />
-            <p className="text-sm font-bold">Profil berhasil diperbarui di Supabase</p>
+            <p className="text-sm font-bold">{successToastMessage}</p>
           </div>
           <button
             type="button"
@@ -408,7 +525,7 @@ export default function Settings() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {(user?.badges ?? ['Fokus Master', 'Awal yang Baik']).map((badge) => (
+              {(user?.badges?.length ? user.badges : ['Pemula Fokus']).map((badge) => (
                 <span
                   key={badge}
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-800"
@@ -419,6 +536,98 @@ export default function Settings() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Pengaturan Notification Blocker (Jembatan WebView Mobile) */}
+      <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-7">
+        <div className="mb-5 flex items-start justify-between gap-3 border-b border-[#DFE4F1] pb-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#FCDDE6] text-[#BE2257]">
+              <BellOff size={20} aria-hidden="true" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[18px] font-bold leading-6 text-[#1F2C4F]">
+                  Pemblokir Notifikasi Saat Mode Fokus
+                </h2>
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#E1EAF8] px-2.5 py-0.5 text-[10px] font-bold text-[#1D3668]">
+                  <Smartphone size={11} />
+                  Android Bridge
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-[#56638A]">
+                Pilih aplikasi yang notifikasinya ingin ditahan otomatis selama sesi fokus berlangsung.
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded-full bg-[#F6F7FC] border border-[#DFE4F1] px-3 py-1 text-xs font-extrabold text-[#1D3668]">
+            {selectedApps.length} Dipilih
+          </span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {BLOCKABLE_APPS.map((app) => {
+            const isChecked = selectedApps.includes(app.packageName)
+            return (
+              <label
+                key={app.packageName}
+                htmlFor={`block-app-${app.packageName}`}
+                className={`flex cursor-pointer items-start gap-3.5 rounded-xl border p-3.5 transition-all select-none ${
+                  isChecked
+                    ? 'border-[#1D3668] bg-[#E1EAF8]/35 shadow-2xs'
+                    : 'border-[#DFE4F1] bg-[#F6F7FC]/70 hover:border-[#B7C7E8] hover:bg-white'
+                }`}
+              >
+                <input
+                  id={`block-app-${app.packageName}`}
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => handleToggleBlockedApp(app.packageName)}
+                  className="sr-only"
+                />
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition ${
+                    isChecked
+                      ? 'border-[#1D3668] bg-[#1D3668] text-white'
+                      : 'border-[#C4C6D0] bg-white text-transparent'
+                  }`}
+                >
+                  <Check size={13} strokeWidth={3} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-[#1F2C4F]">{app.label}</span>
+                    <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-semibold text-[#56638A] border border-[#DFE4F1]">
+                      {app.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-[#56638A]">{app.description}</p>
+                  <span className="mt-1 block font-mono text-[10px] text-[#757780]">
+                    {app.packageName}
+                  </span>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-[#DFE4F1] pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-[#56638A]">
+            Pengaturan ini dikirim ke aplikasi Android melalui jembatan{' '}
+            <code className="rounded bg-[#F6F7FC] px-1.5 py-0.5 font-mono text-[11px] text-[#1D3668]">
+              ReactNativeWebView.postMessage
+            </code>
+          </p>
+          <button
+            type="button"
+            onClick={handleSaveBlockedApps}
+            className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#A11B48] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#BE2257] focus:ring-offset-2"
+          >
+            <Save size={16} aria-hidden="true" />
+            <span>Simpan Daftar Blokir</span>
+          </button>
         </div>
       </section>
 

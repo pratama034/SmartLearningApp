@@ -66,6 +66,8 @@ interface GroupState {
   leaveGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
   kickMember: (groupId: string, targetUserId: string) => Promise<{ success: boolean; error?: string }>
   deleteGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
+  syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => void
+  syncUserCourse: (userId: string, course: string, name?: string) => void
 }
 
 export const useGroupStore = create<GroupState>((set, get) => ({
@@ -152,13 +154,19 @@ export const useGroupStore = create<GroupState>((set, get) => ({
                 .join('')
                 .toUpperCase() || 'M'
 
+            const resolvedCourse =
+              (isCurrentUser && currentUser?.major) ||
+              profile?.major ||
+              m.course ||
+              'Mahasiswa'
+
             return {
               id: m.id,
               userId: m.user_id,
               name: isCurrentUser ? `${name} (Anda)` : name,
               avatar: initials,
-              status: m.status === 'istirahat' ? 'istirahat' : 'fokus',
-              course: m.course || profile?.major || 'Mahasiswa',
+              status: m.status === 'fokus' ? 'fokus' : 'istirahat',
+              course: resolvedCourse,
               isHost: m.role === 'owner',
             }
           })
@@ -236,7 +244,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           group_id: newGroupRow.id,
           user_id: currentUser.id,
           role: 'owner',
-          status: 'fokus',
+          status: 'istirahat',
           course: currentUser.major || 'Mahasiswa',
         })
         .select('*')
@@ -259,7 +267,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         userId: currentUser.id,
         name: `${currentUser.name || 'Anda'} (Host)`,
         avatar: userInitials,
-        status: 'fokus',
+        status: 'istirahat',
         course: currentUser.major || 'Mahasiswa',
         isHost: true,
       }
@@ -325,7 +333,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           group_id: targetGroupRow.id,
           user_id: currentUser.id,
           role: 'member',
-          status: 'fokus',
+          status: 'istirahat',
           course: currentUser.major || 'Mahasiswa',
         })
 
@@ -439,5 +447,54 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       const message = err instanceof Error ? err.message : 'Gagal menghapus ruang belajar.'
       return { success: false, error: message }
     }
+  },
+
+  syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => {
+    set((state) => {
+      const updatedGroups = state.groups.map((g) => ({
+        ...g,
+        members: g.members.map((m) => (m.userId === userId ? { ...m, status } : m)),
+      }))
+      const updatedActive = state.activeGroup
+        ? {
+            ...state.activeGroup,
+            members: state.activeGroup.members.map((m) =>
+              m.userId === userId ? { ...m, status } : m
+            ),
+          }
+        : null
+      return { groups: updatedGroups, activeGroup: updatedActive }
+    })
+  },
+
+  syncUserCourse: (userId: string, course: string, name?: string) => {
+    set((state) => {
+      const updateMember = (m: GroupMemberItem): GroupMemberItem => {
+        if (m.userId !== userId) return m
+        const cleanCourse = course.trim() || m.course
+        let nextName = m.name
+        if (name && name.trim()) {
+          const suffix = m.name.includes('(Host)')
+            ? ' (Host)'
+            : m.name.includes('(Anda)')
+              ? ' (Anda)'
+              : ''
+          nextName = `${name.trim()}${suffix}`
+        }
+        return { ...m, course: cleanCourse, name: nextName }
+      }
+
+      const updatedGroups = state.groups.map((g) => ({
+        ...g,
+        members: g.members.map(updateMember),
+      }))
+      const updatedActive = state.activeGroup
+        ? {
+            ...state.activeGroup,
+            members: state.activeGroup.members.map(updateMember),
+          }
+        : null
+      return { groups: updatedGroups, activeGroup: updatedActive }
+    })
   },
 }))

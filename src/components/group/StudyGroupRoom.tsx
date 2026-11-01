@@ -47,6 +47,7 @@ export interface Message {
   time: string
   kind: 'text' | 'image' | 'document'
   text?: string
+  fileUrl?: string
   fileName?: string
   fileType?: 'PDF' | 'Word' | 'JPG'
   fileSize?: string
@@ -125,6 +126,7 @@ function mapSupabaseRowToMessage(
     time,
     kind: row.kind,
     text: row.is_deleted ? 'Pesan ini telah dihapus' : (row.text || undefined),
+    fileUrl: row.file_url || undefined,
     fileName: row.file_name || undefined,
     fileType: (row.file_type as 'PDF' | 'Word' | 'JPG') || undefined,
     fileSize: row.file_size || undefined,
@@ -197,17 +199,21 @@ function MessageAttachment({
           <span className={isOwn ? 'text-white/75' : 'text-[#56638A]'}>
             JPG · {message.fileSize || '1.8 MB'}
           </span>
-          {message.imageUrl && (
-            <a
-              href={message.imageUrl}
-              download={message.imageLabel || 'gambar_materi.jpg'}
-              className={`inline-flex items-center gap-1 font-semibold hover:underline ${
-                isOwn ? 'text-white' : 'text-[#1D3668]'
-              }`}
-            >
-              <Download size={13} /> Unduh
-            </a>
-          )}
+          <a
+            href={
+              message.imageUrl ||
+              message.fileUrl ||
+              `https://smart-learning-app-mu.vercel.app/downloads/${encodeURIComponent(message.imageLabel || 'gambar_materi.jpg')}`
+            }
+            download={message.imageLabel || 'gambar_materi.jpg'}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`inline-flex items-center gap-1 font-semibold hover:underline ${
+              isOwn ? 'text-white' : 'text-[#1D3668]'
+            }`}
+          >
+            <Download size={13} /> Unduh
+          </a>
         </div>
       </div>
     )
@@ -217,6 +223,9 @@ function MessageAttachment({
     const fileName = message.fileName || 'Tugas_Kelompok.pdf'
     const fileType = message.fileType || 'PDF'
     const isPdf = fileType === 'PDF'
+    const downloadHref =
+      message.fileUrl ||
+      `https://smart-learning-app-mu.vercel.app/downloads/${encodeURIComponent(fileName)}`
 
     return (
       <div
@@ -256,8 +265,11 @@ function MessageAttachment({
             {fileType} · {message.fileSize || (isPdf ? '2.4 MB' : '1.5 MB')}
           </span>
         </div>
-        <button
-          type="button"
+        <a
+          href={downloadHref}
+          download={fileName}
+          target="_blank"
+          rel="noopener noreferrer"
           aria-label={`Unduh ${fileName}`}
           title={`Unduh ${fileName}`}
           className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${
@@ -267,7 +279,7 @@ function MessageAttachment({
           }`}
         >
           <Download size={15} aria-hidden="true" />
-        </button>
+        </a>
       </div>
     )
   }
@@ -1240,7 +1252,7 @@ export default function StudyGroupRoom() {
       )}
 
       {/* 2. Chat Feed Area (Native WhatsApp / Telegram Style) */}
-      <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3 relative bg-[#F8F9FD]">
+      <main className="flex-1 overflow-y-auto px-3 sm:px-6 pt-4 pb-[88px] space-y-3 relative bg-[#F8F9FD]">
         {/* System Date Pill */}
         <div className="flex justify-center mb-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-[#DFE4F1] bg-white/90 backdrop-blur-xs px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#757780] shadow-2xs">
@@ -1393,7 +1405,7 @@ export default function StudyGroupRoom() {
       {showAttachmentMenu && (
         <div
           ref={attachmentMenuRef}
-          className="absolute bottom-16 left-3 sm:left-6 z-30 w-80 sm:w-96 rounded-2xl border border-[#DFE4F1] bg-white p-4 shadow-xl animate-in fade-in slide-in-from-bottom-2"
+          className="fixed bottom-[76px] left-3 sm:left-6 z-30 w-80 sm:w-96 rounded-2xl border border-[#DFE4F1] bg-white p-4 shadow-xl animate-in fade-in slide-in-from-bottom-2"
         >
           <div className="mb-3 flex items-center justify-between border-b border-[#DFE4F1] pb-2">
             <span className="text-xs font-bold text-[#1F2C4F] flex items-center gap-1.5">
@@ -1506,8 +1518,8 @@ export default function StudyGroupRoom() {
         </div>
       )}
 
-      {/* 4. Input Bar Paling Bawah (Aman dari Nav Bar / Home Indicator) */}
-      <footer className="shrink-0 bg-white border-t border-[#DFE4F1] p-2.5 sm:p-3 pb-[max(calc(0.65rem+env(safe-area-inset-bottom,0px)),0.65rem)] z-20 shadow-[0_-2px_10px_rgba(29,54,104,0.03)]">
+      {/* 4. Input Bar Paling Bawah (Aman dari Keyboard HP & Nav Bar / Home Indicator) */}
+      <footer className="fixed bottom-0 left-0 right-0 w-full bg-white pb-safe border-t border-[#DFE4F1] p-2.5 sm:p-3 pb-[max(calc(0.65rem+env(safe-area-inset-bottom,0px)),0.65rem)] z-20 shadow-[0_-2px_10px_rgba(29,54,104,0.03)]">
         {/* Banner Membalas Pesan */}
         {replyingTo && (
           <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-[#DFE4F1] bg-[#E1EAF8]/70 px-3 py-1.5 text-xs text-[#1D3668]">
@@ -1566,6 +1578,11 @@ export default function StudyGroupRoom() {
             id="group-chat-input"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onFocus={() => {
+              window.setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+              }, 250)
+            }}
             placeholder="Ketik pesan diskusi..."
             className="h-11 min-w-0 flex-1 rounded-full border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-sm text-[#1F2C4F] placeholder:text-[#757780] outline-none transition focus:bg-white focus:border-[#1D3668] focus:ring-1 focus:ring-[#1D3668]"
           />
@@ -1675,7 +1692,9 @@ export default function StudyGroupRoom() {
                             </span>
                           )}
                         </p>
-                        <p className="truncate text-[11px] text-[#56638A]">{member.course}</p>
+                        <p className="truncate text-[11px] text-[#56638A]">
+                          {(isSelf && currentUser?.major) || member.course || 'Mahasiswa'}
+                        </p>
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">

@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import type { Session, Subscription, User as SupabaseAuthUser } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { evaluateStreak, calculateNewStreakOnSessionComplete } from '../lib/streak'
+import {
+  evaluateStreak,
+  calculateNewStreakOnSessionComplete,
+  calculateAchievementBadges,
+} from '../lib/streak'
 
 export interface User {
   id: string
@@ -49,32 +53,81 @@ function getStoredOnboardingFlag(): boolean {
   }
 }
 
-function mapProfileToUser(authUser: SupabaseAuthUser, profile?: ProfileRow | null): User {
+function getStoredStreakBackup(userId: string): { streak: number; lastDate: string | null } {
+  if (typeof window === 'undefined') return { streak: 0, lastDate: null }
+  try {
+    const streakVal = Number(window.localStorage.getItem(`smartlearning-streak_${userId}`)) || 0
+    const lastDateVal = window.localStorage.getItem(`smartlearning-last-study-date_${userId}`) || null
+    return { streak: streakVal, lastDate: lastDateVal }
+  } catch {
+    return { streak: 0, lastDate: null }
+  }
+}
+
+function saveStoredStreakBackup(userId: string, streak: number, lastDate: string | null) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(`smartlearning-streak_${userId}`, String(streak))
+    if (lastDate) {
+      window.localStorage.setItem(`smartlearning-last-study-date_${userId}`, lastDate)
+    }
+  } catch {
+    // Abaikan error localStorage
+  }
+}
+
+function mapProfileToUser(
+  authUser: SupabaseAuthUser,
+  profile?: ProfileRow | null,
+  totalSessions = 0
+): User {
+  const userId = profile?.id || authUser.id
   const fallbackName =
     (authUser.user_metadata?.name as string | undefined) ||
     authUser.email?.split('@')[0] ||
     'Mahasiswa'
   const major = profile?.major ?? (authUser.user_metadata?.major as string | undefined) ?? ''
 
-  const rawStreak = typeof profile?.streak === 'number' ? profile.streak : 0
-  const rawLastDate = profile?.last_study_date ?? null
-  const evaluation = evaluateStreak(rawStreak, rawLastDate)
+  const backup = getStoredStreakBackup(userId)
+  const dbStreak = typeof profile?.streak === 'number' ? profile.streak : 0
+  const rawLastDate = profile?.last_study_date ?? backup.lastDate ?? null
+  const rawStreak = dbStreak > 0 ? dbStreak : backup.streak
 
-  // Jika streak bolong kemarin (needsReset), sinkronkan reset streak ke 0 di database
+  const evaluation = evaluateStreak(rawStreak, rawLastDate)
+  const computedBadges = calculateAchievementBadges(evaluation.currentStreak, totalSessions)
+
+  // Simpan backup ke localStorage agar tidak pernah hilang saat refresh
+  saveStoredStreakBackup(userId, evaluation.currentStreak, evaluation.lastStudyDate)
+
+  // Jika streak bolong lebih dari 1 hari (needsReset), sinkronkan reset streak ke 0 di database
   if (evaluation.needsReset && profile?.id) {
     void supabase
       .from('profiles')
-      .update({ streak: 0, updated_at: new Date().toISOString() })
+      .update({
+        streak: 0,
+        badges: computedBadges,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', profile.id)
       .then(({ error }) => {
         if (error) {
           console.warn('[Streak Sync] Gagal reset streak ke Supabase:', error.message)
         }
       })
+  } else if (profile?.id && dbStreak === 0 && evaluation.currentStreak > 0) {
+    // Pulihkan streak ke DB jika sempat ter-reset sebelumnya
+    void supabase
+      .from('profiles')
+      .update({
+        streak: evaluation.currentStreak,
+        badges: computedBadges,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', profile.id)
   }
 
   return {
-    id: profile?.id || authUser.id,
+    id: userId,
     name: profile?.name || fallbackName,
     email: profile?.email || authUser.email || '',
     nim: profile?.nim ?? (authUser.user_metadata?.nim as string | undefined) ?? '',
@@ -84,11 +137,8 @@ function mapProfileToUser(authUser: SupabaseAuthUser, profile?: ProfileRow | nul
       (authUser.user_metadata?.university as string | undefined) ??
       'Universitas Indonesia',
     streak: evaluation.currentStreak,
-    lastStudyDate: rawLastDate,
-    badges:
-      Array.isArray(profile?.badges) && profile.badges.length > 0
-        ? profile.badges
-        : ['Fokus Master', 'Awal yang Baik'],
+    lastStudyDate: evaluation.lastStudyDate ?? rawLastDate,
+    badges: computedBadges,
     isPrivateProfile: Boolean(profile?.is_private_profile),
     program_studi: major,
     role: profile?.role ?? 'mahasiswa',
@@ -101,11 +151,15 @@ async function fetchProfileByUser(
   authUser: SupabaseAuthUser
 ): Promise<{ user: User; hasSeenOnboarding?: boolean }> {
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', authUser.id)
-      .maybeSingle<ProfileRow>()
+    const [{ data, error }, { count: sessionCount }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle<ProfileRow>(),
+      supabase
+        .from('focus_sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', authUser.id),
+    ])
+
+    const totalSessions = sessionCount ?? 0
 
     if (error) {
       console.warn(
@@ -113,7 +167,7 @@ async function fetchProfileByUser(
         error.message
       )
       return {
-        user: mapProfileToUser(authUser, null),
+        user: mapProfileToUser(authUser, null, totalSessions),
         hasSeenOnboarding: false,
       }
     }
@@ -127,6 +181,7 @@ async function fetchProfileByUser(
           authUser.email?.split('@')[0] ||
           'Mahasiswa'
 
+        const initialBadges = calculateAchievementBadges(0, totalSessions)
         const newProfilePayload = {
           id: authUser.id,
           email: authUser.email || '',
@@ -135,8 +190,8 @@ async function fetchProfileByUser(
           major: (authUser.user_metadata?.major as string | undefined) || 'Teknik Informatika',
           university:
             (authUser.user_metadata?.university as string | undefined) || 'Universitas Indonesia',
-          streak: 3,
-          badges: ['Fokus Master', 'Awal yang Baik'],
+          streak: 0,
+          badges: initialBadges,
           is_private_profile: false,
           has_seen_onboarding: false,
           role: 'mahasiswa',
@@ -152,7 +207,7 @@ async function fetchProfileByUser(
 
         if (!insertError && insertedData) {
           return {
-            user: mapProfileToUser(authUser, insertedData),
+            user: mapProfileToUser(authUser, insertedData, totalSessions),
             hasSeenOnboarding: false,
           }
         }
@@ -161,20 +216,20 @@ async function fetchProfileByUser(
       }
 
       return {
-        user: mapProfileToUser(authUser, null),
+        user: mapProfileToUser(authUser, null, totalSessions),
         hasSeenOnboarding: false,
       }
     }
 
     return {
-      user: mapProfileToUser(authUser, data),
+      user: mapProfileToUser(authUser, data, totalSessions),
       hasSeenOnboarding:
         typeof data.has_seen_onboarding === 'boolean' ? data.has_seen_onboarding : undefined,
     }
   } catch (err) {
     console.warn('[Supabase Profiles] Terjadi error tak terduga, menggunakan fallback auth:', err)
     return {
-      user: mapProfileToUser(authUser, null),
+      user: mapProfileToUser(authUser, null, 0),
       hasSeenOnboarding: false,
     }
   }
@@ -427,6 +482,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       const nextMajor = data?.major ?? updatedData.major ?? currentUser.major
+      const nextStreak = typeof data?.streak === 'number' ? data.streak : currentUser.streak
+      const computedBadges = calculateAchievementBadges(nextStreak)
+
+      // Sinkronisasi Program Studi ke tabel study_group_members (Ruang Co-Focus)
+      if (updatedData.major !== undefined && nextMajor) {
+        void supabase
+          .from('study_group_members')
+          .update({ course: nextMajor })
+          .eq('user_id', currentUser.id)
+      }
+
       const updatedUser: User = {
         ...currentUser,
         ...updatedData,
@@ -435,9 +501,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         major: nextMajor,
         program_studi: nextMajor,
         university: data?.university ?? updatedData.university ?? currentUser.university,
-        streak: typeof data?.streak === 'number' ? data.streak : currentUser.streak,
+        streak: nextStreak,
         lastStudyDate: data?.last_study_date ?? updatedData.lastStudyDate ?? currentUser.lastStudyDate ?? null,
-        badges: Array.isArray(data?.badges) ? data.badges : currentUser.badges,
+        badges: computedBadges,
         isPrivateProfile:
           typeof data?.is_private_profile === 'boolean'
             ? data.is_private_profile
@@ -468,11 +534,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       currentUser.lastStudyDate
     )
 
+    // Hitung jumlah sesi untuk kalkulasi tier badge
+    const { count: sessionCount } = await supabase
+      .from('focus_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', currentUser.id)
+
+    const updatedBadges = calculateAchievementBadges(newStreak, sessionCount ?? 1)
+
+    // Simpan ke localStorage agar persisten saat refresh
+    saveStoredStreakBackup(currentUser.id, newStreak, todayStr)
+
     // Update state user lokal secara instan
     const updatedUser: User = {
       ...currentUser,
       streak: newStreak,
       lastStudyDate: todayStr,
+      badges: updatedBadges,
     }
     set({ user: updatedUser })
 
@@ -483,6 +561,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .update({
           streak: newStreak,
           last_study_date: todayStr,
+          badges: updatedBadges,
           updated_at: new Date().toISOString(),
         })
         .eq('id', currentUser.id)
@@ -496,6 +575,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           .from('profiles')
           .update({
             streak: newStreak,
+            badges: updatedBadges,
             updated_at: new Date().toISOString(),
           })
           .eq('id', currentUser.id)

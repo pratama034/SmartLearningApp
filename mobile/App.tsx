@@ -1,12 +1,40 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { BackHandler, Platform, SafeAreaView, StatusBar, StyleSheet } from 'react-native';
-import { WebView, type WebViewNavigation } from 'react-native-webview';
+import {
+  BackHandler,
+  Linking,
+  NativeModules,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+} from 'react-native';
+import {
+  WebView,
+  type WebViewMessageEvent,
+  type WebViewNavigation,
+} from 'react-native-webview';
+
+interface KotlinNotificationBlockerModule {
+  setBlockedPackages?: (packages: string[]) => void;
+}
+
+const { MyKotlinModule } = NativeModules as {
+  MyKotlinModule?: KotlinNotificationBlockerModule;
+};
+
+const DOWNLOADABLE_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx', '.zip'];
+
+function isDownloadableFileUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  const cleanPath = rawUrl.split('?')[0].split('#')[0].toLowerCase();
+  return DOWNLOADABLE_EXTENSIONS.some((ext) => cleanPath.endsWith(ext));
+}
 
 export default function App() {
   const webViewRef = useRef<WebView<object>>(null);
   const [canGoBack, setCanGoBack] = useState(false);
 
-  // TODO: GANTI STRING DI BAWAH DENGAN URL VERCEL ASLI KITA
+  // URL Aplikasi Web Smart Focus di Vercel
   const WEB_URL = 'https://smart-learning-app-mu.vercel.app/';
 
   // Logika untuk menangani tombol Back fisik di Android
@@ -25,6 +53,31 @@ export default function App() {
     };
   }, [canGoBack]);
 
+  // Menangkap pesan dari WebView (contoh: SET_BLOCKED_APPS untuk Notification Blocker)
+  const handleWebViewMessage = (event: WebViewMessageEvent) => {
+    try {
+      const rawData = event.nativeEvent.data;
+      if (!rawData) return;
+
+      const parsed = JSON.parse(rawData) as {
+        type?: string;
+        data?: unknown;
+      };
+
+      if (parsed.type === 'SET_BLOCKED_APPS' && Array.isArray(parsed.data)) {
+        const blockedPackages = parsed.data.filter(
+          (pkg): pkg is string => typeof pkg === 'string'
+        );
+
+        if (MyKotlinModule?.setBlockedPackages) {
+          MyKotlinModule.setBlockedPackages(blockedPackages);
+        }
+      }
+    } catch (err) {
+      console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
@@ -35,6 +88,14 @@ export default function App() {
         onNavigationStateChange={(navState: WebViewNavigation) => {
           setCanGoBack(navState.canGoBack);
         }}
+        onShouldStartLoadWithRequest={(request) => {
+          if (isDownloadableFileUrl(request.url)) {
+            void Linking.openURL(request.url);
+            return false;
+          }
+          return true;
+        }}
+        onMessage={handleWebViewMessage}
         allowsBackForwardNavigationGestures={true}
         bounces={false}
         javaScriptEnabled={true}

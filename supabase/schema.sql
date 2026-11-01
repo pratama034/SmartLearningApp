@@ -27,7 +27,7 @@ create table public.profiles (
   university text not null default 'Universitas Indonesia',
   streak integer not null default 0,
   last_study_date date,
-  badges text[] not null default array['Fokus Master', 'Awal yang Baik']::text[],
+  badges text[] not null default array['Pemula Fokus']::text[],
   is_private_profile boolean not null default false,
   has_seen_onboarding boolean not null default false,
   role text not null default 'mahasiswa' check (role in ('mahasiswa', 'dosen', 'admin')),
@@ -54,8 +54,8 @@ begin
     coalesce(new.raw_user_meta_data->>'nim', ''),
     coalesce(new.raw_user_meta_data->>'major', 'Teknik Informatika'),
     coalesce(new.raw_user_meta_data->>'university', 'Universitas Indonesia'),
-    3,
-    array['Fokus Master', 'Awal yang Baik'],
+    0,
+    array['Pemula Fokus'],
     false,
     false
   )
@@ -80,8 +80,8 @@ select
   coalesce(raw_user_meta_data->>'nim', ''),
   coalesce(raw_user_meta_data->>'major', 'Teknik Informatika'),
   coalesce(raw_user_meta_data->>'university', 'Universitas Indonesia'),
-  3,
-  array['Fokus Master', 'Awal yang Baik'],
+  0,
+  array['Pemula Fokus'],
   false,
   false
 from auth.users
@@ -280,6 +280,39 @@ create policy "Pengguna mengelola focus_sessions miliknya sendiri"
   on public.focus_sessions for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+create policy "Sesi fokus profil publik dapat dibaca untuk agregasi kampus"
+  on public.focus_sessions for select
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1 from public.profiles p
+      where p.id = focus_sessions.user_id and p.is_private_profile = false
+    )
+  );
+
+-- Fungsi RPC Agregasi Komparasi Kampus (SUM durasi_fokus di-group berdasarkan entitas kampus)
+create or replace function public.get_campus_focus_stats()
+returns table (
+  campus_name text,
+  total_focus_seconds bigint,
+  total_sessions bigint,
+  student_count bigint
+)
+language sql
+security definer
+as $$
+  select
+    coalesce(nullif(trim(p.university), ''), 'Universitas Indonesia') as campus_name,
+    coalesce(sum(fs.actual_duration), 0)::bigint as total_focus_seconds,
+    count(fs.id)::bigint as total_sessions,
+    count(distinct p.id)::bigint as student_count
+  from public.profiles p
+  left join public.focus_sessions fs on fs.user_id = p.id
+  where p.is_private_profile = false or p.id = auth.uid()
+  group by coalesce(nullif(trim(p.university), ''), 'Universitas Indonesia')
+  order by total_focus_seconds desc;
+$$;
 
 -- Kebijakan Study Groups & Members
 create policy "Semua pengguna login dapat melihat study_groups"

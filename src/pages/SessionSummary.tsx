@@ -31,6 +31,7 @@ export default function SessionSummary() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const storeSummary = useSessionStore((state) => state.lastSessionSummary)
+  const lastSavedSessionId = useSessionStore((state) => state.lastSavedSessionId)
   const isSaving = useSessionStore((state) => state.isSaving)
   const storeError = useSessionStore((state) => state.error)
   const clearError = useSessionStore((state) => state.clearError)
@@ -62,6 +63,7 @@ export default function SessionSummary() {
 
     try {
       await saveSessionToDatabase({
+        sessionId: summary.sessionId ?? lastSavedSessionId,
         userId: user?.id,
         studyBlockId: summary.block?.id ?? null,
         targetDuration: summary.targetDurationSeconds,
@@ -80,9 +82,14 @@ export default function SessionSummary() {
       }, 1400)
     } catch (error) {
       const msg =
-        error instanceof Error ? error.message : 'Gagal menyimpan sesi fokus ke Supabase.'
+        error instanceof Error ? error.message : 'Gagal memperbarui catatan refleksi di Supabase.'
       setFormError(msg)
     }
+  }
+
+  function handleSkipReflection() {
+    resetSession()
+    navigate('/dashboard', { replace: true })
   }
 
   if (!summary) {
@@ -234,25 +241,38 @@ export default function SessionSummary() {
               {formError}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={isSaving || showSuccessToast}
-            className="mt-4 flex h-[46px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 size={18} className="animate-spin" aria-hidden="true" />
-                <span>Menyimpan ke Cloud...</span>
-              </>
-            ) : showSuccessToast ? (
-              <>
-                <Flame size={18} className="fill-white text-white animate-bounce" aria-hidden="true" />
-                <span>Sesi disimpan! Streak diperbarui 🔥</span>
-              </>
-            ) : (
-              <span>Simpan Refleksi & Kembali ke Dashboard</span>
-            )}
-          </button>
+          <p className="mt-2 text-xs text-[#56638A]">
+            Laporan durasi fokus & poin streak telah tercatat otomatis. Isi refleksi di atas untuk memperbarui catatan sesi ini.
+          </p>
+          <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
+            <button
+              type="submit"
+              disabled={isSaving || showSuccessToast}
+              className="flex h-[46px] flex-1 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                  <span>Memperbarui Refleksi...</span>
+                </>
+              ) : showSuccessToast ? (
+                <>
+                  <Flame size={18} className="fill-white text-white animate-bounce" aria-hidden="true" />
+                  <span>Refleksi berhasil diperbarui! 🔥</span>
+                </>
+              ) : (
+                <span>Simpan Refleksi & Kembali ke Dashboard</span>
+              )}
+            </button>
+            <button
+              type="button"
+              disabled={isSaving || showSuccessToast}
+              onClick={handleSkipReflection}
+              className="flex h-[46px] items-center justify-center rounded-[10px] border border-[#DFE4F1] bg-white px-5 text-sm font-bold text-[#56638A] transition hover:bg-[#F6F7FC] hover:text-[#1D3668] disabled:opacity-50"
+            >
+              Lewati & ke Dashboard
+            </button>
+          </div>
         </form>
       </section>
     </div>

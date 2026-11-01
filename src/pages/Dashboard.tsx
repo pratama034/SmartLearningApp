@@ -24,8 +24,10 @@ import {
   mockSessions,
   mockUsers,
 } from '../lib/mockData'
+import { supabase } from '../lib/supabase'
 import { evaluateStreak, formatLastStudyDateLabel } from '../lib/streak'
 import { useAuthStore } from '../store/authStore'
+import { useGroupStore } from '../store/groupStore'
 import WelcomeModal from '../components/WelcomeModal'
 import { useSessionStore, type FocusStatus } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
@@ -238,13 +240,152 @@ export default function Dashboard() {
   const activeBlock = useSessionStore((state) => state.activeBlock)
   const focusStatus = useSessionStore((state) => state.status)
   const startSession = useSessionStore((state) => state.startSession)
+  const heldNotifications = useSessionStore((state) => state.heldNotifications)
+  const lastSessionSummary = useSessionStore((state) => state.lastSessionSummary)
+  const fetchMyGroups = useGroupStore((state) => state.fetchMyGroups)
   const today = getTodayDate()
 
+  // State Realtime untuk angka Dashboard ("Ditunda" & "Rekan Sedang Fokus")
+  const [livePeerTotalCount, setLivePeerTotalCount] = useState(0)
+  const [liveFocusedPeers, setLiveFocusedPeers] = useState<
+    Array<{ id: string; name: string; course: string }>
+  >([])
+  const [pendingTasksCount, setPendingTasksCount] = useState(0)
+
   useEffect(() => {
-    if (authUser?.id) {
-      void fetchStudyBlocks(authUser.id)
+    const uid = authUser?.id
+    if (!uid) return
+
+    let isMounted = true
+
+    async function syncDashboardRealtimeStats() {
+      try {
+        // 1. Hitung jumlah sub-tugas yang belum selesai ("Ditunda")
+        const { count: taskCount } = await supabase
+          .from('study_block_sub_tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_completed', false)
+
+        if (isMounted && typeof taskCount === 'number') {
+          setPendingTasksCount(taskCount)
+        }
+
+        // 2. Ambil daftar rekan satu grup dan siapa yang berstatus 'fokus'
+        const { data: myMemberships } = await supabase
+          .from('study_group_members')
+          .select('group_id')
+          .eq('user_id', uid)
+
+        const myGroupIds = (myMemberships || []).map((m: { group_id: string }) => m.group_id)
+        if (myGroupIds.length === 0) {
+          if (isMounted) {
+            setLivePeerTotalCount(0)
+            setLiveFocusedPeers([])
+          }
+          return
+        }
+
+        const { data: peerRows } = await supabase
+          .from('study_group_members')
+          .select('user_id, status, course')
+          .in('group_id', myGroupIds)
+          .neq('user_id', uid)
+
+        const uniquePeersMap = new Map<string, { status: string; course: string }>()
+        for (const row of (peerRows as Array<{ user_id: string; status: string; course: string | null }>) || []) {
+          const prev = uniquePeersMap.get(row.user_id)
+          if (!prev || row.status === 'fokus') {
+            uniquePeersMap.set(row.user_id, {
+              status: row.status,
+              course: row.course || 'Mahasiswa',
+            })
+          }
+        }
+
+        if (isMounted) {
+          setLivePeerTotalCount(uniquePeersMap.size)
+        }
+
+        const focusedUserIds = Array.from(uniquePeersMap.entries())
+          .filter(([, info]) => info.status === 'fokus')
+          .map(([peerId]) => peerId)
+
+        if (focusedUserIds.length === 0) {
+          if (isMounted) {
+            setLiveFocusedPeers([])
+          }
+          return
+        }
+
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, name, major')
+          .in('id', focusedUserIds)
+
+        const profileMap = new Map(
+          ((profilesData as Array<{ id: string; name: string | null; major: string | null }>) || []).map(
+            (p) => [p.id, p]
+          )
+        )
+
+        const focusedList = focusedUserIds.map((peerId) => {
+          const prof = profileMap.get(peerId)
+          const memberInfo = uniquePeersMap.get(peerId)
+          return {
+            id: peerId,
+            name: prof?.name || 'Rekan Kelompok',
+            course: prof?.major || memberInfo?.course || 'Mahasiswa',
+          }
+        })
+
+        if (isMounted) {
+          setLiveFocusedPeers(focusedList)
+        }
+      } catch (err) {
+        console.warn('[Dashboard Realtime] Gagal menyinkronkan statistik live:', err)
+      }
     }
-  }, [authUser?.id, fetchStudyBlocks])
+
+    void fetchStudyBlocks(uid)
+    void fetchMyGroups(uid)
+    void syncDashboardRealtimeStats()
+
+    // Subscribe ke channel Supabase Realtime untuk update angka Dashboard otomatis
+    const dashboardChannel = supabase
+      .channel(`dashboard-live-stats:${uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'study_group_members' },
+        () => {
+          void syncDashboardRealtimeStats()
+          void fetchMyGroups(uid)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'study_block_sub_tasks' },
+        () => {
+          void syncDashboardRealtimeStats()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'study_blocks', filter: `user_id=eq.${uid}` },
+        () => {
+          void fetchStudyBlocks(uid)
+          void syncDashboardRealtimeStats()
+        }
+      )
+      .on('broadcast', { event: 'dashboard_update' }, () => {
+        void syncDashboardRealtimeStats()
+      })
+      .subscribe()
+
+    return () => {
+      isMounted = false
+      void supabase.removeChannel(dashboardChannel)
+    }
+  }, [authUser?.id, fetchStudyBlocks, fetchMyGroups])
 
   const todayBlocks = blocks
     .filter((block) => block.date === today)
@@ -259,15 +400,27 @@ export default function Dashboard() {
   const userGroupIds = new Set(
     mockGroupMembers.filter((member) => member.user_id === currentUser.id).map((member) => member.group_id),
   )
-  const coFocusFriendIds = new Set(
+  const mockCoFocusFriendIds = new Set(
     mockGroupMembers
       .filter((member) => userGroupIds.has(member.group_id) && member.user_id !== currentUser.id)
       .map((member) => member.user_id),
   )
-  const focusedFriends = mockSessions
-    .filter((session) => session.status === 'active' && coFocusFriendIds.has(session.user_id))
+  const mockFocusedFriends = mockSessions
+    .filter((session) => session.status === 'active' && mockCoFocusFriendIds.has(session.user_id))
     .map((session) => mockUsers.find((user) => user.id === session.user_id))
     .filter((user): user is (typeof mockUsers)[number] => Boolean(user))
+
+  const totalCoFocusPeers = authUser?.id ? livePeerTotalCount : mockCoFocusFriendIds.size
+  const focusedFriends = authUser?.id
+    ? liveFocusedPeers
+    : mockFocusedFriends.map((u) => ({ id: u.id, name: u.name, course: u.program_studi || 'Mahasiswa' }))
+
+  const heldNotificationCount =
+    heldNotifications.length > 0
+      ? heldNotifications.length
+      : (lastSessionSummary?.heldNotifications?.length ?? 0) +
+        pendingTasksCount +
+        relevantNotifications.filter((notification) => !notification.passed).length
   const activeCount = todayBlocks.filter((block) => {
     const status = getBlockStatus(block, activeBlock, focusStatus)
     return status === 'active' || status === 'paused'
@@ -492,8 +645,8 @@ export default function Dashboard() {
           tone="rose"
           eyebrow="Notif"
           label="Ditunda"
-          value={relevantNotifications.filter((notification) => !notification.passed).length}
-          detail={activeBlock ? 'Sesi yang berjalan' : 'Sesi terakhir'}
+          value={heldNotificationCount}
+          detail={activeBlock ? 'Sesi yang berjalan' : pendingTasksCount > 0 ? `${pendingTasksCount} tugas aktif` : 'Sesi terakhir'}
         />
         <StatTile
           icon={ShieldCheck}
@@ -508,7 +661,7 @@ export default function Dashboard() {
           tone="navy"
           eyebrow="Live"
           label="Co-focus"
-          value={coFocusFriendIds.size}
+          value={totalCoFocusPeers}
           detail={`${focusedFriends.length} sedang fokus`}
         />
       </section>
@@ -588,7 +741,13 @@ export default function Dashboard() {
 
             {focusedFriends.length ? (
               focusedFriends.map((friend, index) => {
-                const initials = friend.name.split(' ').map((part) => part[0]).slice(0, 2).join('')
+                const initials =
+                  friend.name
+                    .split(' ')
+                    .map((part) => part[0])
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase() || 'RK'
                 const session = mockSessions.find((item) => item.user_id === friend.id && item.status === 'active')
                 const block = session ? blocks.find((item) => item.id === session.block_id) : undefined
 
@@ -601,7 +760,9 @@ export default function Dashboard() {
                       <p className="text-[13px] leading-[18px] text-[#1F2C4F]">
                         <strong className="font-semibold">{friend.name}</strong> sedang fokus{block ? ` pada ${block.title}` : ''}.
                       </p>
-                      <span className="mt-1 block text-xs font-semibold text-[#BE2257]">Mode Fokus aktif</span>
+                      <span className="mt-1 block text-xs font-semibold text-[#BE2257]">
+                        Mode Fokus aktif · {friend.course || 'Mahasiswa'}
+                      </span>
                     </div>
                   </div>
                 )

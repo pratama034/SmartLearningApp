@@ -36,7 +36,7 @@ export default function FocusMode() {
   const startSession = useSessionStore((state) => state.startSession)
   const pauseSession = useSessionStore((state) => state.pauseSession)
   const resumeSession = useSessionStore((state) => state.resumeSession)
-  const endSession = useSessionStore((state) => state.endSession)
+  const stopFocus = useSessionStore((state) => state.stopFocus)
   const heldNotifications = useSessionStore((state) => state.heldNotifications)
   const addHeldNotification = useSessionStore((state) => state.addHeldNotification)
   const tick = useSessionStore((state) => state.tick)
@@ -57,13 +57,13 @@ export default function FocusMode() {
 
   useEffect(() => {
     if (status === 'running' && remainingTime === 0) {
-      endSession()
+      void stopFocus()
       navigate('/summary', { replace: true })
     }
-  }, [endSession, navigate, remainingTime, status])
+  }, [stopFocus, navigate, remainingTime, status])
 
   function finishSession() {
-    endSession()
+    void stopFocus()
     navigate('/summary')
   }
 

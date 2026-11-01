@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from './authStore'
+import { useGroupStore } from './groupStore'
 import type { StudyBlock } from '../types'
 
 export type FocusStatus = 'idle' | 'running' | 'paused'
@@ -13,6 +14,7 @@ export interface HeldNotification {
 }
 
 export interface SessionSummary {
+  sessionId?: string | null
   block: StudyBlock
   targetDurationSeconds: number
   durationSeconds: number
@@ -23,6 +25,7 @@ export interface SessionSummary {
 }
 
 export interface SaveSessionPayload {
+  sessionId?: string | null
   userId?: string
   studyBlockId?: string | null
   targetDuration: number
@@ -40,12 +43,14 @@ interface SessionState {
   startedAt: string | null
   heldNotifications: HeldNotification[]
   lastSessionSummary: SessionSummary | null
+  lastSavedSessionId: string | null
   isSaving: boolean
   error: string | null
   clearError: () => void
   startSession: (block: StudyBlock) => void
   pauseSession: () => void
   resumeSession: () => void
+  stopFocus: () => Promise<string | null>
   endSession: () => void
   resetSession: () => void
   addHeldNotification: (notification: HeldNotification) => void
@@ -66,6 +71,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   startedAt: null,
   heldNotifications: [],
   lastSessionSummary: null,
+  lastSavedSessionId: null,
   isSaving: false,
   error: null,
 
@@ -82,8 +88,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       remainingTime: duration,
       startedAt: new Date().toISOString(),
       heldNotifications: [],
+      lastSavedSessionId: null,
       error: null,
     })
+
+    // Update status anggota di ruang Co-Focus menjadi 'fokus'
+    const currentUserId = useAuthStore.getState().user?.id
+    if (currentUserId) {
+      useGroupStore.getState().syncUserStatus(currentUserId, 'fokus')
+      void supabase
+        .from('study_group_members')
+        .update({ status: 'fokus' })
+        .eq('user_id', currentUserId)
+    }
   },
 
   pauseSession: () =>
@@ -92,36 +109,130 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   resumeSession: () =>
     set((state) => (state.status === 'paused' ? { status: 'running' } : state)),
 
-  endSession: () =>
-    set((state) => {
-      const startVal = state.activeBlock?.startTime ?? state.activeBlock?.start_time ?? '00:00'
-      const endVal = state.activeBlock?.endTime ?? state.activeBlock?.end_time ?? '00:00'
-      const plannedDuration = state.activeBlock
-        ? Math.max(0, timeToSeconds(endVal) - timeToSeconds(startVal))
-        : 0
-      const actualDuration = Math.max(0, plannedDuration - state.remainingTime)
-      const completionStatus: SessionCompletionStatus =
-        state.remainingTime <= 0 ? 'completed' : 'ended_early'
+  stopFocus: async () => {
+    const state = get()
+    if (!state.activeBlock) {
+      return state.lastSavedSessionId
+    }
 
-      return {
-        activeBlock: null,
-        status: 'idle',
-        remainingTime: 0,
-        startedAt: null,
-        heldNotifications: [],
-        lastSessionSummary: state.activeBlock
-          ? {
-              block: state.activeBlock,
-              targetDurationSeconds: plannedDuration,
-              durationSeconds: actualDuration,
-              completionStatus,
-              startedAt: state.startedAt ?? new Date().toISOString(),
-              endedAt: new Date().toISOString(),
-              heldNotifications: state.heldNotifications,
-            }
-          : state.lastSessionSummary,
+    const startVal = state.activeBlock.startTime ?? state.activeBlock.start_time ?? '00:00'
+    const endVal = state.activeBlock.endTime ?? state.activeBlock.end_time ?? '00:00'
+    const plannedDuration = Math.max(0, timeToSeconds(endVal) - timeToSeconds(startVal))
+    const actualDuration = Math.max(1, plannedDuration - state.remainingTime)
+    const completionStatus: SessionCompletionStatus =
+      state.remainingTime <= 0 ? 'completed' : 'ended_early'
+    const startedAtIso = state.startedAt ?? new Date().toISOString()
+    const endedAtIso = new Date().toISOString()
+
+    const summarySnapshot: SessionSummary = {
+      sessionId: null,
+      block: state.activeBlock,
+      targetDurationSeconds: plannedDuration,
+      durationSeconds: actualDuration,
+      completionStatus,
+      startedAt: startedAtIso,
+      endedAt: endedAtIso,
+      heldNotifications: state.heldNotifications,
+    }
+
+    // 1. Hentikan timer secara instan di state lokal
+    set({
+      activeBlock: null,
+      status: 'idle',
+      remainingTime: 0,
+      startedAt: null,
+      heldNotifications: [],
+      lastSessionSummary: summarySnapshot,
+      lastSavedSessionId: null,
+    })
+
+    const currentUserId = useAuthStore.getState().user?.id
+    if (!currentUserId) {
+      return null
+    }
+
+    // 2. Kembalikan status user di study_group_members agar tidak nyangkut "Sedang Fokus"
+    useGroupStore.getState().syncUserStatus(currentUserId, 'istirahat')
+    void supabase
+      .from('study_group_members')
+      .update({ status: 'istirahat' })
+      .eq('user_id', currentUserId)
+
+    // 3. Tambahkan poin streak langsung saat stopFocus (tanpa menunggu form refleksi)
+    try {
+      await useAuthStore.getState().recordSessionCompletionForStreak()
+    } catch (streakErr) {
+      console.warn('[stopFocus] Gagal memperbarui streak:', streakErr)
+    }
+
+    // 4. Langsung INSERT laporan sesi ke tabel focus_sessions
+    try {
+      const dbPayload = {
+        user_id: currentUserId,
+        study_block_id: summarySnapshot.block.id ?? null,
+        target_duration: summarySnapshot.targetDurationSeconds,
+        actual_duration: summarySnapshot.durationSeconds,
+        completion_status: summarySnapshot.completionStatus,
+        reflection_note: '',
+        started_at: startedAtIso,
+        ended_at: endedAtIso,
       }
-    }),
+
+      const { data: insertedRow, error: insertError } = await supabase
+        .from('focus_sessions')
+        .insert(dbPayload)
+        .select('id')
+        .single<{ id: string }>()
+
+      if (!insertError && insertedRow?.id) {
+        set((prev) => ({
+          lastSavedSessionId: insertedRow.id,
+          lastSessionSummary: prev.lastSessionSummary
+            ? { ...prev.lastSessionSummary, sessionId: insertedRow.id }
+            : null,
+        }))
+        return insertedRow.id
+      }
+
+      if (insertError) {
+        console.warn('[stopFocus] Mencoba fallback insert focus_sessions:', insertError.message)
+        const fallbackPayload = {
+          user_id: currentUserId,
+          block_id: summarySnapshot.block.id ?? null,
+          started_at: startedAtIso,
+          ended_at: endedAtIso,
+          duration_seconds: summarySnapshot.durationSeconds,
+          status: 'completed',
+          ended_by: summarySnapshot.completionStatus === 'completed' ? 'system' : 'user',
+          reflection_notes: '',
+        }
+
+        const { data: fallbackRow, error: fallbackError } = await supabase
+          .from('focus_sessions')
+          .insert(fallbackPayload)
+          .select('id')
+          .single<{ id: string }>()
+
+        if (!fallbackError && fallbackRow?.id) {
+          set((prev) => ({
+            lastSavedSessionId: fallbackRow.id,
+            lastSessionSummary: prev.lastSessionSummary
+              ? { ...prev.lastSessionSummary, sessionId: fallbackRow.id }
+              : null,
+          }))
+          return fallbackRow.id
+        }
+      }
+    } catch (err) {
+      console.error('[stopFocus] Gagal menyimpan laporan sesi awal:', err)
+    }
+
+    return null
+  },
+
+  endSession: () => {
+    void get().stopFocus()
+  },
 
   resetSession: () =>
     set({
@@ -131,6 +242,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       startedAt: null,
       heldNotifications: [],
       lastSessionSummary: null,
+      lastSavedSessionId: null,
       isSaving: false,
       error: null,
     }),
@@ -156,8 +268,43 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       throw new Error(msg)
     }
 
+    const existingSessionId =
+      sessionData.sessionId ||
+      get().lastSavedSessionId ||
+      get().lastSessionSummary?.sessionId ||
+      null
+
     try {
-      // Pemetaan dari camelCase (Frontend) ke snake_case (Supabase)
+      // Jika sesi sudah di-INSERT saat stopFocus, cukup lakukan UPDATE pada reflection_note
+      if (existingSessionId) {
+        const { error: updateError } = await supabase
+          .from('focus_sessions')
+          .update({
+            reflection_note: sessionData.reflectionNote.trim(),
+          })
+          .eq('id', existingSessionId)
+          .eq('user_id', resolvedUserId)
+
+        if (updateError) {
+          // Fallback nama kolom alternatif
+          const { error: fallbackUpdateErr } = await supabase
+            .from('focus_sessions')
+            .update({
+              reflection_notes: sessionData.reflectionNote.trim(),
+            })
+            .eq('id', existingSessionId)
+            .eq('user_id', resolvedUserId)
+
+          if (fallbackUpdateErr) {
+            throw new Error(updateError.message)
+          }
+        }
+
+        get().resetSession()
+        return
+      }
+
+      // Fallback INSERT jika karena kendala jaringan belum tersimpan saat stopFocus
       const dbPayload = {
         user_id: resolvedUserId,
         study_block_id: sessionData.studyBlockId ?? null,
@@ -172,7 +319,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (insertError) {
         console.error('SUPABASE ERROR (focus_sessions insert):', insertError)
 
-        // Fallback jika tabel focus_sessions di database menggunakan nama kolom alternatif dari schema.sql awal
         const fallbackPayload = {
           user_id: resolvedUserId,
           block_id: sessionData.studyBlockId ?? null,
@@ -194,21 +340,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
       }
 
-      // Update streak belajar di profil pengguna
-      try {
-        await useAuthStore.getState().recordSessionCompletionForStreak()
-      } catch (streakErr) {
-        console.warn('Gagal memperbarui streak belajar:', streakErr)
-      }
-
-      // Jika berhasil disimpan, pastikan status timer kembali ke idle
+      // Pastikan status timer di-reset ke idle
       get().resetSession()
     } catch (error) {
       console.error('SUPABASE ERROR:', error)
       const message =
         error instanceof Error
           ? error.message
-          : 'Gagal menyimpan sesi fokus dan jurnal refleksi ke Supabase.'
+          : 'Gagal menyimpan jurnal refleksi ke Supabase.'
       set({ isSaving: false, error: message })
       throw new Error(message)
     } finally {
