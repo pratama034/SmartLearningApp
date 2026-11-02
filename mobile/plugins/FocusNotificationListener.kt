@@ -9,8 +9,7 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.smartlearning.focus.FocusEnforcementModule
-import com.smartlearning.focus.FocusPrefs
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -18,13 +17,39 @@ class FocusNotificationListener : NotificationListenerService() {
 
   companion object {
     private const val TAG = "FocusNotification"
+    private const val PREFS = "smartlearning_focus"
+    private const val KEY_ACTIVE = "focus_active"
+    private const val KEY_PACKAGES = "blocked_packages"
+    private const val KEY_NOTIFICATIONS = "held_notifications"
+
     var reactContext: ReactContext? = null
+
+    private fun isFocusActive(context: Context): Boolean {
+      val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      return prefs.getBoolean(KEY_ACTIVE, false)
+    }
+
+    private fun getBlockedPackages(context: Context): Set<String> {
+      val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      return prefs.getStringSet(KEY_PACKAGES, emptySet())?.toSet() ?: emptySet()
+    }
+
+    private fun addHeldNotification(context: Context, item: JSONObject) {
+      val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      val raw = prefs.getString(KEY_NOTIFICATIONS, "[]")
+      val old = runCatching { JSONArray(raw) }.getOrDefault(JSONArray())
+      val next = JSONArray()
+      val start = (old.length() - 99).coerceAtLeast(0)
+      for (index in start until old.length()) next.put(old.getJSONObject(index))
+      next.put(item)
+      prefs.edit().putString(KEY_NOTIFICATIONS, next.toString()).apply()
+    }
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
     try {
-      val selectedApps = FocusPrefs.blockedPackages(this)
-      if (!FocusPrefs.isActive(this) || sbn.packageName == packageName || sbn.packageName !in selectedApps) return
+      val selectedApps = getBlockedPackages(this)
+      if (!isFocusActive(this) || sbn.packageName == packageName || sbn.packageName !in selectedApps) return
 
       val extras = sbn.notification.extras
       val title = extras?.getString(Notification.EXTRA_TITLE)
@@ -54,7 +79,7 @@ class FocusNotificationListener : NotificationListenerService() {
 
       val notificationId = UUID.randomUUID().toString()
 
-      FocusPrefs.addHeldNotification(this, JSONObject().apply {
+      addHeldNotification(this, JSONObject().apply {
         put("id", notificationId)
         put("packageName", sbn.packageName)
         put("appName", appName)
@@ -64,7 +89,13 @@ class FocusNotificationListener : NotificationListenerService() {
       })
 
       // Kirim event realtime dari Kotlin ke React Native
-      val targetReactContext = reactContext ?: FocusEnforcementModule.reactContext
+      val targetReactContext = reactContext ?: runCatching {
+        val moduleClass = Class.forName("com.smartlearning.focus.FocusEnforcementModule")
+        val field = moduleClass.getDeclaredField("reactContext")
+        field.isAccessible = true
+        field.get(null) as? ReactContext
+      }.getOrNull()
+
       if (targetReactContext != null) {
         val blockedDataMap = Arguments.createMap().apply {
           putString("id", notificationId)
@@ -86,4 +117,3 @@ class FocusNotificationListener : NotificationListenerService() {
     }
   }
 }
-

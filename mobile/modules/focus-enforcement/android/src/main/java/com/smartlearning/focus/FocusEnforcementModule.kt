@@ -20,6 +20,12 @@ class FocusEnforcementModule : Module() {
     OnCreate {
       val ctx = appContext.reactContext
       reactContext = ctx
+      runCatching {
+        val listenerClass = Class.forName("${ctx?.packageName}.FocusNotificationListener")
+        val field = listenerClass.getDeclaredField("reactContext")
+        field.isAccessible = true
+        field.set(null, ctx)
+      }
     }
 
     Function("setFocusEnabled") { enabled: Boolean, blockedPackages: List<String> ->

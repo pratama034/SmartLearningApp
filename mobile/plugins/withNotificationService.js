@@ -76,32 +76,32 @@ function withNotificationService(config) {
   config = withDangerousMod(config, [
     'android',
     async (modConfig) => {
-      try {
-        const packageName = modConfig.android?.package || 'com.smartlearning.app'
-        const packageSegments = packageName.split('.')
-        const targetDir = path.join(
-          modConfig.modRequest.platformProjectRoot,
-          'app',
-          'src',
-          'main',
-          'java',
-          ...packageSegments
-        )
-        fs.mkdirSync(targetDir, { recursive: true })
+      const packageName = modConfig.android?.package || 'com.smartlearning.app'
+      const packageSegments = packageName.split('.')
+      const targetDir = path.join(
+        modConfig.modRequest.platformProjectRoot,
+        'app',
+        'src',
+        'main',
+        'java',
+        ...packageSegments
+      )
+      fs.mkdirSync(targetDir, { recursive: true })
 
-        // Read source template
-        const sourcePath = path.join(__dirname, 'FocusNotificationListener.kt')
-        let content = fs.readFileSync(sourcePath, 'utf8')
-
-        // Replace package declaration dynamically to match app.json
-        content = content.replace(/^package\s+[\w.]+/m, `package ${packageName}`)
-
-        // Write to destination
-        const destPath = path.join(targetDir, 'FocusNotificationListener.kt')
-        fs.writeFileSync(destPath, content, 'utf8')
-      } catch (err) {
-        console.warn('[withNotificationService] Gagal menyalin FocusNotificationListener.kt:', err)
+      // Read source template
+      const sourcePath = path.join(__dirname, 'FocusNotificationListener.kt')
+      if (!fs.existsSync(sourcePath)) {
+        throw new Error(`[withNotificationService] File sumber tidak ditemukan di: ${sourcePath}`)
       }
+      let content = fs.readFileSync(sourcePath, 'utf8')
+
+      // Replace package declaration dynamically to match app.json
+      content = content.replace(/^package\s+[\w.]+/m, `package ${packageName}`)
+
+      // Write to destination
+      const destPath = path.join(targetDir, 'FocusNotificationListener.kt')
+      fs.writeFileSync(destPath, content, 'utf8')
+
       return modConfig
     },
   ])
