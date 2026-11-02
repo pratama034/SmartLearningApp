@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal object FocusPrefs {
+object FocusPrefs {
   private const val PREFS = "smartlearning_focus"
   private const val KEY_ACTIVE = "focus_active"
   private const val KEY_PACKAGES = "blocked_packages"

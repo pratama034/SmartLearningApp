@@ -1,10 +1,15 @@
-const { withAndroidManifest } = require('@expo/config-plugins')
+const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins')
+const fs = require('fs')
+const path = require('path')
 
 /**
- * Expo Config Plugin to register NotificationListenerService in AndroidManifest.xml
+ * Expo Config Plugin to:
+ * 1. Register FocusNotificationListener service in AndroidManifest.xml
+ * 2. Dynamically copy FocusNotificationListener.kt with package replacement matching app.json
  */
 function withNotificationService(config) {
-  return withAndroidManifest(config, async (modConfig) => {
+  // 1. AndroidManifest configuration
+  config = withAndroidManifest(config, async (modConfig) => {
     const androidManifest = modConfig.modResults.manifest
 
     // Pastikan <uses-permission> POST_NOTIFICATIONS & BIND_NOTIFICATION_LISTENER_SERVICE ada
@@ -66,6 +71,42 @@ function withNotificationService(config) {
 
     return modConfig
   })
+
+  // 2. Dynamic copy of FocusNotificationListener.kt with matching package name
+  config = withDangerousMod(config, [
+    'android',
+    async (modConfig) => {
+      try {
+        const packageName = modConfig.android?.package || 'com.smartlearning.app'
+        const packageSegments = packageName.split('.')
+        const targetDir = path.join(
+          modConfig.modRequest.platformProjectRoot,
+          'app',
+          'src',
+          'main',
+          'java',
+          ...packageSegments
+        )
+        fs.mkdirSync(targetDir, { recursive: true })
+
+        // Read source template
+        const sourcePath = path.join(__dirname, 'FocusNotificationListener.kt')
+        let content = fs.readFileSync(sourcePath, 'utf8')
+
+        // Replace package declaration dynamically to match app.json
+        content = content.replace(/^package\s+[\w.]+/m, `package ${packageName}`)
+
+        // Write to destination
+        const destPath = path.join(targetDir, 'FocusNotificationListener.kt')
+        fs.writeFileSync(destPath, content, 'utf8')
+      } catch (err) {
+        console.warn('[withNotificationService] Gagal menyalin FocusNotificationListener.kt:', err)
+      }
+      return modConfig
+    },
+  ])
+
+  return config
 }
 
 module.exports = withNotificationService

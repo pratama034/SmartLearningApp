@@ -20,13 +20,11 @@ class FocusEnforcementModule : Module() {
     OnCreate {
       val ctx = appContext.reactContext
       reactContext = ctx
-      FocusNotificationListener.reactContext = ctx
     }
 
     Function("setFocusEnabled") { enabled: Boolean, blockedPackages: List<String> ->
       appContext.reactContext?.let {
         reactContext = it
-        FocusNotificationListener.reactContext = it
         FocusPrefs.setFocus(it, enabled, blockedPackages)
       }
     }
@@ -34,7 +32,6 @@ class FocusEnforcementModule : Module() {
     Function("setBlockedPackages") { blockedPackages: List<String> ->
       appContext.reactContext?.let {
         reactContext = it
-        FocusNotificationListener.reactContext = it
         FocusPrefs.setFocus(it, true, blockedPackages)
       }
     }
@@ -60,12 +57,10 @@ class FocusEnforcementModule : Module() {
 
     Function("isNotificationAccessEnabled") {
       val context = appContext.reactContext ?: return@Function false
-      val expected = ComponentName(context, FocusNotificationListener::class.java).flattenToString()
       val listeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
       if (listeners.isNullOrBlank()) return@Function false
-      listeners.contains(expected) ||
-        listeners.contains("${context.packageName}/.FocusNotificationListener") ||
-        listeners.contains("${context.packageName}/com.smartlearning.app.FocusNotificationListener") ||
+      listeners.contains("${context.packageName}/.FocusNotificationListener") ||
+        listeners.contains("${context.packageName}/${context.packageName}.FocusNotificationListener") ||
         listeners.contains("FocusNotificationListener")
     }
 
