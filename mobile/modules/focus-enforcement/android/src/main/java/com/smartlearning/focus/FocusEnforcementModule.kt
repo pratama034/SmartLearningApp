@@ -32,7 +32,14 @@ class FocusEnforcementModule : Module() {
     Function("setFocusEnabled") { enabled: Boolean, blockedPackages: List<String> ->
       val context = appContext.reactContext
       if (context != null) {
-        reactContext = context as? ReactContext
+        val ctx = context as? ReactContext
+        reactContext = ctx
+        runCatching {
+          val listenerClass = Class.forName("${context.packageName}.FocusNotificationListener")
+          val field = listenerClass.getDeclaredField("reactContext")
+          field.isAccessible = true
+          field.set(null, ctx)
+        }
         FocusPrefs.setFocus(context, enabled, blockedPackages)
       }
       true
@@ -41,7 +48,14 @@ class FocusEnforcementModule : Module() {
     Function("setBlockedPackages") { blockedPackages: List<String> ->
       val context = appContext.reactContext
       if (context != null) {
-        reactContext = context as? ReactContext
+        val ctx = context as? ReactContext
+        reactContext = ctx
+        runCatching {
+          val listenerClass = Class.forName("${context.packageName}.FocusNotificationListener")
+          val field = listenerClass.getDeclaredField("reactContext")
+          field.isAccessible = true
+          field.set(null, ctx)
+        }
         FocusPrefs.setBlockedPackages(context, blockedPackages)
       }
       true

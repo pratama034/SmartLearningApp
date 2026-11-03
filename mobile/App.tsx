@@ -190,6 +190,22 @@ export default function App() {
         })(); true;`;
         webViewRef.current?.injectJavaScript(jsCode);
       }
+
+      if (parsed.type === 'SYNC_HELD_NOTIFICATIONS') {
+        const held = FocusEnforcement.isNativeAvailable()
+          ? FocusEnforcement.getHeldNotifications()
+          : [];
+        const jsCode = `(function() {
+          try {
+            window.dispatchEvent(new CustomEvent('NATIVE_HELD_NOTIFICATIONS_SYNC', {
+              detail: ${JSON.stringify(held)}
+            }));
+          } catch (e) {
+            console.error('Error dispatching NATIVE_HELD_NOTIFICATIONS_SYNC:', e);
+          }
+        })(); true;`;
+        webViewRef.current?.injectJavaScript(jsCode);
+      }
     } catch (err) {
       console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);
     }

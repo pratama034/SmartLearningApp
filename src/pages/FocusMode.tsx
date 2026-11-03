@@ -100,6 +100,69 @@ export default function FocusMode() {
     }
   }, [addHeldNotification])
 
+  // Sinkronisasi berkala dari memori HP Android (SharedPreferences) selama sesi berjalan
+  useEffect(() => {
+    if (status !== 'running') return
+
+    const triggerSync = () => {
+      if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+        window.ReactNativeWebView.postMessage(
+          JSON.stringify({ type: 'SYNC_HELD_NOTIFICATIONS' })
+        )
+      }
+    }
+
+    triggerSync()
+    const interval = setInterval(triggerSync, 2500)
+
+    function handleSyncNotifs(event: Event) {
+      const customEvent = event as CustomEvent<Array<{
+        id?: string
+        packageName?: string
+        appName?: string
+        title?: string
+        text?: string
+        receivedAt?: number | string
+      }>>
+      const list = customEvent.detail
+      if (!Array.isArray(list)) return
+
+      const currentHeld = useSessionStore.getState().heldNotifications
+      const existingIds = new Set(currentHeld.map((n) => n.id))
+
+      list.forEach((item) => {
+        const id = item.id || `notif-${item.receivedAt}-${item.packageName}`
+        if (!existingIds.has(id)) {
+          existingIds.add(id)
+          const title = item.title || 'Tidak Diketahui'
+          const text = item.text || ''
+          const appName =
+            item.appName ||
+            (item.packageName ? item.packageName.substring(item.packageName.lastIndexOf('.') + 1) : 'Aplikasi')
+          const formattedReceivedAt =
+            typeof item.receivedAt === 'number'
+              ? new Date(item.receivedAt).toISOString()
+              : item.receivedAt || new Date().toISOString()
+
+          addHeldNotification({
+            id,
+            title,
+            text,
+            appName,
+            packageName: item.packageName,
+            receivedAt: formattedReceivedAt,
+          })
+        }
+      })
+    }
+
+    window.addEventListener('NATIVE_HELD_NOTIFICATIONS_SYNC', handleSyncNotifs)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('NATIVE_HELD_NOTIFICATIONS_SYNC', handleSyncNotifs)
+    }
+  }, [status, addHeldNotification])
+
   const todayBlocks = blocks
     .filter((block) => block.date === todayDate())
     .sort((first, second) => first.start_time.localeCompare(second.start_time))
