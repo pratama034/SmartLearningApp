@@ -30,50 +30,73 @@ class FocusEnforcementModule : Module() {
     }
 
     Function("setFocusEnabled") { enabled: Boolean, blockedPackages: List<String> ->
-      appContext.reactContext?.let { ctx ->
-        reactContext = ctx as? ReactContext
-        FocusPrefs.setFocus(ctx, enabled, blockedPackages)
+      val context = appContext.reactContext
+      if (context != null) {
+        reactContext = context as? ReactContext
+        FocusPrefs.setFocus(context, enabled, blockedPackages)
       }
+      true
     }
 
     Function("setBlockedPackages") { blockedPackages: List<String> ->
-      appContext.reactContext?.let { ctx ->
-        reactContext = ctx as? ReactContext
-        FocusPrefs.setFocus(ctx, true, blockedPackages)
+      val context = appContext.reactContext
+      if (context != null) {
+        reactContext = context as? ReactContext
+        FocusPrefs.setFocus(context, true, blockedPackages)
       }
+      true
     }
 
     Function("isFocusEnabled") {
-      appContext.reactContext?.let(FocusPrefs::isActive) ?: false
+      val context = appContext.reactContext
+      if (context != null) {
+        FocusPrefs.isActive(context)
+      } else {
+        false
+      }
     }
 
     Function("isAccessibilityEnabled") {
-      val context = appContext.reactContext ?: return@Function false
-      val expected = ComponentName(context, FocusAccessibilityService::class.java).flattenToString()
-      val enabledServices = Settings.Secure.getString(
-        context.contentResolver,
-        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-      )
-      if (enabledServices.isNullOrBlank()) return@Function false
-      val splitter = TextUtils.SimpleStringSplitter(':')
-      splitter.setString(enabledServices)
-      var found = false
-      while (splitter.hasNext()) {
-        if (splitter.next().equals(expected, ignoreCase = true)) {
-          found = true
-          break
+      val context = appContext.reactContext
+      if (context == null) {
+        false
+      } else {
+        val expected = ComponentName(context, FocusAccessibilityService::class.java).flattenToString()
+        val enabledServices = Settings.Secure.getString(
+          context.contentResolver,
+          Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        )
+        if (enabledServices.isNullOrBlank()) {
+          false
+        } else {
+          val splitter = TextUtils.SimpleStringSplitter(':')
+          splitter.setString(enabledServices)
+          var found = false
+          while (splitter.hasNext()) {
+            if (splitter.next().equals(expected, ignoreCase = true)) {
+              found = true
+              break
+            }
+          }
+          found
         }
       }
-      found
     }
 
     Function("isNotificationAccessEnabled") {
-      val context = appContext.reactContext ?: return@Function false
-      val listeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-      if (listeners.isNullOrBlank()) return@Function false
-      listeners.contains("${context.packageName}/.FocusNotificationListener") ||
-        listeners.contains("${context.packageName}/${context.packageName}.FocusNotificationListener") ||
-        listeners.contains("FocusNotificationListener")
+      val context = appContext.reactContext
+      if (context == null) {
+        false
+      } else {
+        val listeners = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        if (listeners.isNullOrBlank()) {
+          false
+        } else {
+          listeners.contains("${context.packageName}/.FocusNotificationListener") ||
+            listeners.contains("${context.packageName}/${context.packageName}.FocusNotificationListener") ||
+            listeners.contains("FocusNotificationListener")
+        }
+      }
     }
 
     Function("openAccessibilitySettings") {
@@ -86,6 +109,7 @@ class FocusEnforcementModule : Module() {
       } else {
         appContext.reactContext?.startActivity(intent)
       }
+      true
     }
 
     Function("openNotificationSettings") {
@@ -98,16 +122,24 @@ class FocusEnforcementModule : Module() {
       } else {
         appContext.reactContext?.startActivity(intent)
       }
+      true
     }
 
     Function("getHeldNotifications") {
-      val context = appContext.reactContext ?: return@Function emptyList<Map<String, Any>>()
-      FocusPrefs.heldNotifications(context)
+      val context = appContext.reactContext
+      if (context != null) {
+        FocusPrefs.heldNotifications(context)
+      } else {
+        emptyList<Map<String, Any>>()
+      }
     }
 
     Function("clearHeldNotifications") {
-      val context = appContext.reactContext ?: return@Function
-      FocusPrefs.clearHeldNotifications(context)
+      val context = appContext.reactContext
+      if (context != null) {
+        FocusPrefs.clearHeldNotifications(context)
+      }
+      true
     }
   }
 }
