@@ -1,4 +1,4 @@
-import { AlertCircle, CheckSquare, Clock3, Pause, Play, Square, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CheckSquare, Clock3, Pause, Play, Square, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStudyDate } from '../data/mockData'
@@ -184,20 +184,40 @@ export default function FocusMode() {
 
           {todayBlocks.length ? (
             <div className="grid gap-3.5 md:grid-cols-2">
-              {todayBlocks.map((block) => (
-                <article key={block.id} className="flex flex-col rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#1D3668]">{block.type}</span>
-                  <h3 className="mt-2 text-[18px] font-bold leading-6 text-[#1F2C4F]">{block.title}</h3>
-                  <p className="mt-1 flex items-center gap-1.5 text-[13px] text-[#56638A]"><Clock3 size={15} aria-hidden="true" /> {block.start_time.replace(':', '.')} - {block.end_time.replace(':', '.')}</p>
-                  <button
-                    type="button"
-                    onClick={() => startSession(block)}
-                    className="mt-5 flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2"
-                  >
-                    <Play size={17} fill="currentColor" aria-hidden="true" /> Mulai Fokus
-                  </button>
-                </article>
-              ))}
+              {todayBlocks.map((block) => {
+                const isCompleted = block.status === 'completed'
+                return (
+                  <article key={block.id} className="flex flex-col rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#1D3668]">{block.type}</span>
+                      {isCompleted && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#D6F0DE] px-2.5 py-0.5 text-[11px] font-semibold text-[#17623A]">
+                          <CheckCircle2 size={12} /> Selesai
+                        </span>
+                      )}
+                    </div>
+                    <h3 className={`mt-2 text-[18px] font-bold leading-6 ${isCompleted ? 'text-gray-400 line-through' : 'text-[#1F2C4F]'}`}>{block.title}</h3>
+                    <p className="mt-1 flex items-center gap-1.5 text-[13px] text-[#56638A]"><Clock3 size={15} aria-hidden="true" /> {block.start_time.replace(':', '.')} - {block.end_time.replace(':', '.')}</p>
+                    {isCompleted ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-5 flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#F6F7FC] px-4 text-sm font-semibold text-[#56638A] cursor-not-allowed border border-[#DFE4F1]"
+                      >
+                        <CheckCircle2 size={16} /> Sesi Telah Selesai
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startSession(block)}
+                        className="mt-5 flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2"
+                      >
+                        <Play size={17} fill="currentColor" aria-hidden="true" /> Mulai Fokus
+                      </button>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-[#C4C6D0] bg-white p-8 text-center text-sm leading-5 text-[#56638A]">

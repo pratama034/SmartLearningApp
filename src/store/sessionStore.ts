@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from './authStore'
 import { useGroupStore } from './groupStore'
+import { useStudyStore } from './studyStore'
 import type { StudyBlock } from '../types'
 
 export type FocusStatus = 'idle' | 'running' | 'paused'
@@ -96,7 +97,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       error: null,
     })
 
-    // Sinyal ke Android Native Bridge bahwa mode fokus dimulai
+    // Sinyal ke Android Native Bridge bahwa mode fokus dimulai & bersihkan notifikasi lama
     if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
       let blockedApps: string[] = []
       try {
@@ -105,6 +106,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       } catch {
         // Abaikan error localStorage
       }
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({
+          type: 'CLEAR_HELD_NOTIFICATIONS',
+        })
+      )
       window.ReactNativeWebView.postMessage(
         JSON.stringify({
           type: 'START_FOCUS',
@@ -230,6 +236,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       await useAuthStore.getState().recordSessionCompletionForStreak()
     } catch (streakErr) {
       console.warn('[stopFocus] Gagal memperbarui streak:', streakErr)
+    }
+
+    // 3. Tandai jadwal (Study Block) menjadi 'completed' agar tidak dapat dimulai ulang
+    if (summarySnapshot.block?.id) {
+      try {
+        void useStudyStore.getState().updateStudyBlock(summarySnapshot.block.id, {
+          status: 'completed',
+        })
+      } catch (blockErr) {
+        console.warn('[stopFocus] Gagal memperbarui status study_block:', blockErr)
+      }
     }
 
     // 4. Langsung INSERT laporan sesi ke tabel focus_sessions

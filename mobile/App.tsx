@@ -119,6 +119,8 @@ export default function App() {
           : [];
 
         if (FocusEnforcement.isNativeAvailable()) {
+          // Bersihkan memori notifikasi tertahan dari sesi sebelumnya agar sesi baru dimulai dari 0
+          FocusEnforcement.clearHeldNotifications();
           FocusEnforcement.setFocusEnabled(true, blockedPackages);
         }
 
@@ -126,6 +128,12 @@ export default function App() {
           'Sistem HP: Mode Fokus Dimulai! Pemblokir notifikasi aktif.',
           ToastAndroid.SHORT
         );
+      }
+
+      if (parsed.type === 'CLEAR_HELD_NOTIFICATIONS') {
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.clearHeldNotifications();
+        }
       }
 
       if (parsed.type === 'STOP_FOCUS') {
