@@ -62,7 +62,7 @@ class FocusNotificationListener : NotificationListenerService() {
       val start = (old.length() - 99).coerceAtLeast(0)
       for (index in start until old.length()) next.put(old.getJSONObject(index))
       next.put(item)
-      prefs.edit().putString(KEY_NOTIFICATIONS, next.toString()).apply()
+      prefs.edit().putString(KEY_NOTIFICATIONS, next.toString()).commit()
     }
   }
 

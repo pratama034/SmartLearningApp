@@ -38,13 +38,13 @@ object FocusPrefs {
     prefs(context).edit()
       .putBoolean(KEY_ACTIVE, active)
       .putStringSet(KEY_PACKAGES, toSave)
-      .apply()
+      .commit()
   }
 
   fun setBlockedPackages(context: Context, packages: List<String>) {
     prefs(context).edit()
       .putStringSet(KEY_PACKAGES, packages.filter { it.isNotBlank() }.toSet())
-      .apply()
+      .commit()
   }
 
   fun addHeldNotification(context: Context, item: JSONObject) {
@@ -53,7 +53,7 @@ object FocusPrefs {
     val start = (old.length() - 99).coerceAtLeast(0)
     for (index in start until old.length()) next.put(old.getJSONObject(index))
     next.put(item)
-    prefs(context).edit().putString(KEY_NOTIFICATIONS, next.toString()).apply()
+    prefs(context).edit().putString(KEY_NOTIFICATIONS, next.toString()).commit()
   }
 
   fun heldNotifications(context: Context): List<Map<String, Any>> {
@@ -74,6 +74,6 @@ object FocusPrefs {
   }
 
   fun clearHeldNotifications(context: Context) {
-    prefs(context).edit().remove(KEY_NOTIFICATIONS).apply()
+    prefs(context).edit().remove(KEY_NOTIFICATIONS).commit()
   }
 }
