@@ -111,6 +111,85 @@ export default function App() {
           ToastAndroid.SHORT
         );
       }
+
+      if (parsed.type === 'START_FOCUS') {
+        const payloadData = parsed.data as { blockedPackages?: string[] } | undefined;
+        const blockedPackages = Array.isArray(payloadData?.blockedPackages)
+          ? payloadData.blockedPackages.filter((pkg): pkg is string => typeof pkg === 'string')
+          : [];
+
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.setFocusEnabled(true, blockedPackages);
+        }
+
+        ToastAndroid.show(
+          'Sistem HP: Mode Fokus Dimulai! Pemblokir notifikasi aktif.',
+          ToastAndroid.SHORT
+        );
+      }
+
+      if (parsed.type === 'STOP_FOCUS') {
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.setFocusEnabled(false, []);
+        }
+
+        ToastAndroid.show(
+          'Sistem HP: Sesi Fokus Berakhir. Notifikasi kembali normal.',
+          ToastAndroid.SHORT
+        );
+      }
+
+      if (parsed.type === 'OPEN_NOTIFICATION_SETTINGS') {
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.openNotificationSettings();
+          ToastAndroid.show(
+            'Membuka Pengaturan Akses Notifikasi Android...',
+            ToastAndroid.SHORT
+          );
+        } else {
+          ToastAndroid.show(
+            'Pengaturan Akses Notifikasi hanya didukung di perangkat Android.',
+            ToastAndroid.SHORT
+          );
+        }
+      }
+
+      if (parsed.type === 'OPEN_ACCESSIBILITY_SETTINGS') {
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.openAccessibilitySettings();
+          ToastAndroid.show(
+            'Membuka Pengaturan Aksesibilitas Android...',
+            ToastAndroid.SHORT
+          );
+        } else {
+          ToastAndroid.show(
+            'Pengaturan Aksesibilitas hanya didukung di perangkat Android.',
+            ToastAndroid.SHORT
+          );
+        }
+      }
+
+      if (parsed.type === 'CHECK_PERMISSIONS') {
+        const notifAccess = FocusEnforcement.isNativeAvailable()
+          ? FocusEnforcement.isNotificationAccessEnabled()
+          : false;
+        const accessibility = FocusEnforcement.isNativeAvailable()
+          ? FocusEnforcement.isAccessibilityEnabled()
+          : false;
+        const jsCode = `(function() {
+          try {
+            window.dispatchEvent(new CustomEvent('NATIVE_PERMISSIONS_STATUS', {
+              detail: {
+                notificationAccess: ${notifAccess},
+                accessibility: ${accessibility}
+              }
+            }));
+          } catch (e) {
+            console.error('Error dispatching NATIVE_PERMISSIONS_STATUS:', e);
+          }
+        })(); true;`;
+        webViewRef.current?.injectJavaScript(jsCode);
+      }
     } catch (err) {
       console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);
     }
@@ -134,6 +213,35 @@ export default function App() {
           return true;
         }}
         onMessage={handleWebViewMessage}
+        onLoadEnd={() => {
+          try {
+            const notifAccess = FocusEnforcement.isNativeAvailable()
+              ? FocusEnforcement.isNotificationAccessEnabled()
+              : false;
+            const accessibility = FocusEnforcement.isNativeAvailable()
+              ? FocusEnforcement.isAccessibilityEnabled()
+              : false;
+            const heldNotifs = FocusEnforcement.isNativeAvailable()
+              ? FocusEnforcement.getHeldNotifications()
+              : [];
+            const jsCode = `(function() {
+              try {
+                window.dispatchEvent(new CustomEvent('NATIVE_PERMISSIONS_STATUS', {
+                  detail: {
+                    notificationAccess: ${notifAccess},
+                    accessibility: ${accessibility}
+                  }
+                }));
+                ${heldNotifs.map((n) => `window.dispatchEvent(new CustomEvent('NATIVE_NOTIFICATION_BLOCKED', { detail: ${JSON.stringify(n)} }));`).join('\n')}
+              } catch (e) {
+                console.error('Error in initial bridge sync:', e);
+              }
+            })(); true;`;
+            webViewRef.current?.injectJavaScript(jsCode);
+          } catch (err) {
+            console.warn('[WebView Bridge] Gagal sync status awal:', err);
+          }
+        }}
         allowsBackForwardNavigationGestures={true}
         bounces={false}
         javaScriptEnabled={true}

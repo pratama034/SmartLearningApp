@@ -15,9 +15,20 @@ object FocusPrefs {
   fun isActive(context: Context) = prefs(context).getBoolean(KEY_ACTIVE, false)
   fun blockedPackages(context: Context) = prefs(context).getStringSet(KEY_PACKAGES, emptySet())?.toSet() ?: emptySet()
 
-  fun setFocus(context: Context, active: Boolean, packages: List<String>) {
+  fun setFocus(context: Context, active: Boolean, packages: List<String> = emptyList()) {
+    val toSave = if (packages.isNotEmpty()) {
+      packages.filter { it.isNotBlank() }.toSet()
+    } else {
+      blockedPackages(context)
+    }
     prefs(context).edit()
       .putBoolean(KEY_ACTIVE, active)
+      .putStringSet(KEY_PACKAGES, toSave)
+      .apply()
+  }
+
+  fun setBlockedPackages(context: Context, packages: List<String>) {
+    prefs(context).edit()
       .putStringSet(KEY_PACKAGES, packages.filter { it.isNotBlank() }.toSet())
       .apply()
   }

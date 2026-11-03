@@ -1,13 +1,16 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  AlertCircle,
   BellOff,
   Building2,
   Check,
   CheckCircle2,
+  ExternalLink,
   Flame,
   GraduationCap,
   Hash,
+  Info,
   LogOut,
   Mail,
   Medal,
@@ -115,6 +118,62 @@ export default function Settings() {
   const [errorToast, setErrorToast] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedApps, setSelectedApps] = useState<string[]>(getInitialBlockedApps)
+  const [permissionStatus, setPermissionStatus] = useState<{
+    notificationAccess: boolean | null
+    accessibility: boolean | null
+  }>({
+    notificationAccess: null,
+    accessibility: null,
+  })
+
+  // Sinkronisasi status izin dari native Android via event 'NATIVE_PERMISSIONS_STATUS'
+  useEffect(() => {
+    function handlePermissionStatus(event: Event) {
+      const customEvent = event as CustomEvent<{
+        notificationAccess?: boolean
+        accessibility?: boolean
+      }>
+      if (customEvent.detail) {
+        setPermissionStatus({
+          notificationAccess: customEvent.detail.notificationAccess ?? null,
+          accessibility: customEvent.detail.accessibility ?? null,
+        })
+      }
+    }
+
+    window.addEventListener('NATIVE_PERMISSIONS_STATUS', handlePermissionStatus)
+
+    // Minta native Android untuk memeriksa izin saat ini
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({ type: 'CHECK_PERMISSIONS' })
+      )
+    }
+
+    return () => {
+      window.removeEventListener('NATIVE_PERMISSIONS_STATUS', handlePermissionStatus)
+    }
+  }, [])
+
+  function handleOpenNotificationSettings() {
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({ type: 'OPEN_NOTIFICATION_SETTINGS' })
+      )
+    } else {
+      setErrorToast('Fitur ini memerlukan aplikasi Android Smart Focus.')
+    }
+  }
+
+  function handleOpenAccessibilitySettings() {
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({ type: 'OPEN_ACCESSIBILITY_SETTINGS' })
+      )
+    } else {
+      setErrorToast('Fitur ini memerlukan aplikasi Android Smart Focus.')
+    }
+  }
 
   if (user?.id !== prevUserId) {
     setPrevUserId(user?.id)
@@ -564,6 +623,68 @@ export default function Settings() {
           <span className="shrink-0 rounded-full bg-[#F6F7FC] border border-[#DFE4F1] px-3 py-1 text-xs font-extrabold text-[#1D3668]">
             {selectedApps.length} Dipilih
           </span>
+        </div>
+
+        {/* Panel Izin Sistem Android (Notification Access & Accessibility) */}
+        <div className="mb-6 rounded-xl border border-[#DFE4F1] bg-[#F6F7FC] p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#E1EAF8] text-[#1D3668]">
+                <ShieldCheck size={20} />
+              </span>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-[#1F2C4F]">Izin Akses Notifikasi Android</h3>
+                  {permissionStatus.notificationAccess === true && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 size={11} /> Aktif
+                    </span>
+                  )}
+                  {permissionStatus.notificationAccess === false && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-200">
+                      <AlertCircle size={11} /> Belum Diizinkan
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-xs text-[#56638A]">
+                  Android mewajibkan izin &quot;Akses Notifikasi&quot; agar aplikasi dapat menahan dan membatalkan notifikasi saat sesi fokus.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleOpenNotificationSettings}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D3668] px-3.5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#15274d] active:scale-[0.98]"
+              >
+                <ShieldCheck size={14} />
+                <span>Buka Izin Akses Notifikasi</span>
+                <ExternalLink size={12} className="opacity-80" />
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenAccessibilitySettings}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#DFE4F1] bg-white px-3 py-2 text-xs font-semibold text-[#1F2C4F] shadow-xs transition hover:bg-[#F3F4FA] active:scale-[0.98]"
+              >
+                <span>Izin Aksesibilitas</span>
+                <ExternalLink size={12} className="opacity-70" />
+              </button>
+            </div>
+          </div>
+
+          {/* Tips Android 13/14+ Restricted Settings */}
+          <div className="mt-3.5 flex items-start gap-2.5 rounded-lg border border-amber-200/80 bg-amber-50/70 p-3 text-xs text-amber-900">
+            <Info size={16} className="mt-0.5 shrink-0 text-amber-700" />
+            <div className="space-y-0.5 leading-relaxed">
+              <p className="font-semibold text-amber-950">
+                Catatan Khusus Android 13/14+ (Jika tombol izin abu-abu / tidak bisa diklik):
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Buka <strong>Pengaturan HP &gt; Aplikasi &gt; Smart Focus &gt; Titik Tiga (⋮) di pojok kanan atas &gt; Izinkan pengaturan terbatas</strong> (Allow restricted settings), lalu aktifkan kembali Akses Notifikasi.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

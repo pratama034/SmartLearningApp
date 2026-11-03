@@ -96,6 +96,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       error: null,
     })
 
+    // Sinyal ke Android Native Bridge bahwa mode fokus dimulai
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      let blockedApps: string[] = []
+      try {
+        const stored = window.localStorage.getItem('smartlearning_blocked_apps')
+        if (stored) blockedApps = JSON.parse(stored)
+      } catch {
+        // Abaikan error localStorage
+      }
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({
+          type: 'START_FOCUS',
+          data: { blockedPackages: blockedApps },
+        })
+      )
+    }
+
     // TAHAP 1: Update status anggota di ruang Co-Focus menjadi 'fokus'
     const updateMemberToFocus = async () => {
       try {
@@ -194,6 +211,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       lastSessionSummary: summarySnapshot,
       lastSavedSessionId: null,
     })
+
+    // Sinyal ke Android Native Bridge bahwa mode fokus telah berakhir
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({
+          type: 'STOP_FOCUS',
+        })
+      )
+    }
 
     if (!currentUserId) {
       return null
@@ -295,6 +321,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       isSaving: false,
       error: null,
     })
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({
+          type: 'STOP_FOCUS',
+        })
+      )
+    }
   },
 
   addHeldNotification: (notification) =>

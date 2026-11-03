@@ -42,7 +42,7 @@ class FocusEnforcementModule : Module() {
       val context = appContext.reactContext
       if (context != null) {
         reactContext = context as? ReactContext
-        FocusPrefs.setFocus(context, true, blockedPackages)
+        FocusPrefs.setBlockedPackages(context, blockedPackages)
       }
       true
     }
