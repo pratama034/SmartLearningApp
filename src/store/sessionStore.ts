@@ -99,13 +99,30 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     // Sinyal ke Android Native Bridge bahwa mode fokus dimulai & bersihkan notifikasi lama
     if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
-      let blockedApps: string[] = []
+      const defaultBlockList = [
+        'com.whatsapp',
+        'com.whatsapp.w4b',
+        'com.instagram.android',
+        'com.zhiliaoapp.musically',
+        'com.twitter.android',
+        'org.telegram.messenger',
+        'com.google.android.youtube',
+      ]
+      let blockedApps: string[] = defaultBlockList
       try {
-        const stored = window.localStorage.getItem('smartlearning_blocked_apps')
-        if (stored) blockedApps = JSON.parse(stored)
+        const stored =
+          window.localStorage.getItem('smartlearning-blocked-apps') ||
+          window.localStorage.getItem('smartlearning_blocked_apps')
+        if (stored) {
+          const parsed = JSON.parse(stored)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            blockedApps = parsed.filter((item): item is string => typeof item === 'string')
+          }
+        }
       } catch {
-        // Abaikan error localStorage
+        // Abaikan error localStorage, gunakan defaultBlockList
       }
+
       window.ReactNativeWebView.postMessage(
         JSON.stringify({
           type: 'CLEAR_HELD_NOTIFICATIONS',
@@ -114,7 +131,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       window.ReactNativeWebView.postMessage(
         JSON.stringify({
           type: 'START_FOCUS',
-          data: { blockedPackages: blockedApps },
+          data: { blockedPackages: blockedApps, clearNotifications: true },
         })
       )
     }

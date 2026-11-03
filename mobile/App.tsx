@@ -114,9 +114,21 @@ export default function App() {
 
       if (parsed.type === 'START_FOCUS') {
         const payloadData = parsed.data as { blockedPackages?: string[] } | undefined;
-        const blockedPackages = Array.isArray(payloadData?.blockedPackages)
+        let blockedPackages = Array.isArray(payloadData?.blockedPackages)
           ? payloadData.blockedPackages.filter((pkg): pkg is string => typeof pkg === 'string')
           : [];
+
+        if (blockedPackages.length === 0) {
+          blockedPackages = [
+            'com.whatsapp',
+            'com.whatsapp.w4b',
+            'com.instagram.android',
+            'com.zhiliaoapp.musically',
+            'com.twitter.android',
+            'org.telegram.messenger',
+            'com.google.android.youtube',
+          ];
+        }
 
         if (FocusEnforcement.isNativeAvailable()) {
           // Bersihkan memori notifikasi tertahan dari sesi sebelumnya agar sesi baru dimulai dari 0

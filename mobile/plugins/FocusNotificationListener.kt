@@ -31,7 +31,27 @@ class FocusNotificationListener : NotificationListenerService() {
 
     private fun getBlockedPackages(context: Context): Set<String> {
       val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-      return prefs.getStringSet(KEY_PACKAGES, emptySet())?.toSet() ?: emptySet()
+      val saved = prefs.getStringSet(KEY_PACKAGES, null)?.toSet()
+      if (!saved.isNullOrEmpty()) {
+        return saved
+      }
+      return setOf(
+        "com.whatsapp",
+        "com.whatsapp.w4b",
+        "com.instagram.android",
+        "com.zhiliaoapp.musically",
+        "com.twitter.android",
+        "org.telegram.messenger",
+        "com.google.android.youtube"
+      )
+    }
+
+    private fun isPackageBlocked(pkg: String, blocked: Set<String>): Boolean {
+      if (pkg in blocked) return true
+      if (pkg == "com.whatsapp.w4b" && "com.whatsapp" in blocked) return true
+      if (pkg.contains("whatsapp", ignoreCase = true) && ("com.whatsapp" in blocked || "com.whatsapp.w4b" in blocked)) return true
+      if (pkg.contains("instagram", ignoreCase = true) && "com.instagram.android" in blocked) return true
+      return false
     }
 
     private fun addHeldNotification(context: Context, item: JSONObject) {
@@ -49,7 +69,11 @@ class FocusNotificationListener : NotificationListenerService() {
   override fun onNotificationPosted(sbn: StatusBarNotification) {
     try {
       val selectedApps = getBlockedPackages(this)
-      if (!isFocusActive(this) || sbn.packageName == packageName || sbn.packageName !in selectedApps) return
+      if (!isFocusActive(this) || sbn.packageName == packageName || !isPackageBlocked(sbn.packageName, selectedApps)) return
+
+      // Batalkan notifikasi dari status bar dan heads-up banner sesegera mungkin
+      runCatching { cancelNotification(sbn.key) }
+      runCatching { cancelNotification(sbn.packageName, sbn.tag, sbn.id) }
 
       val extras = sbn.notification.extras
       val title = extras?.getString(Notification.EXTRA_TITLE)

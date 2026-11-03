@@ -13,7 +13,21 @@ object FocusPrefs {
   private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
   fun isActive(context: Context) = prefs(context).getBoolean(KEY_ACTIVE, false)
-  fun blockedPackages(context: Context) = prefs(context).getStringSet(KEY_PACKAGES, emptySet())?.toSet() ?: emptySet()
+  fun blockedPackages(context: Context): Set<String> {
+    val saved = prefs(context).getStringSet(KEY_PACKAGES, null)?.toSet()
+    if (!saved.isNullOrEmpty()) {
+      return saved
+    }
+    return setOf(
+      "com.whatsapp",
+      "com.whatsapp.w4b",
+      "com.instagram.android",
+      "com.zhiliaoapp.musically",
+      "com.twitter.android",
+      "org.telegram.messenger",
+      "com.google.android.youtube"
+    )
+  }
 
   fun setFocus(context: Context, active: Boolean, packages: List<String> = emptyList()) {
     val toSave = if (packages.isNotEmpty()) {
