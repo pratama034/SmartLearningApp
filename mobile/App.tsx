@@ -100,6 +100,7 @@ export default function App() {
 
         if (FocusEnforcement.isNativeAvailable()) {
           FocusEnforcement.setBlockedPackages(blockedPackages);
+          FocusEnforcement.rebindNotificationListener();
         }
 
         if (MyKotlinModule?.setBlockedPackages) {
@@ -134,6 +135,7 @@ export default function App() {
           // Bersihkan memori notifikasi tertahan dari sesi sebelumnya agar sesi baru dimulai dari 0
           FocusEnforcement.clearHeldNotifications();
           FocusEnforcement.setFocusEnabled(true, blockedPackages);
+          FocusEnforcement.rebindNotificationListener();
         }
 
         ToastAndroid.show(
@@ -189,6 +191,16 @@ export default function App() {
         }
       }
 
+      if (parsed.type === 'OPEN_BATTERY_SETTINGS') {
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.openBatteryOptimizationSettings();
+          ToastAndroid.show(
+            'Membuka Pengaturan Baterai / Latar Belakang Android...',
+            ToastAndroid.SHORT
+          );
+        }
+      }
+
       if (parsed.type === 'CHECK_PERMISSIONS') {
         const notifAccess = FocusEnforcement.isNativeAvailable()
           ? FocusEnforcement.isNotificationAccessEnabled()
@@ -196,6 +208,11 @@ export default function App() {
         const accessibility = FocusEnforcement.isNativeAvailable()
           ? FocusEnforcement.isAccessibilityEnabled()
           : false;
+
+        if (FocusEnforcement.isNativeAvailable()) {
+          FocusEnforcement.rebindNotificationListener();
+        }
+
         const jsCode = `(function() {
           try {
             window.dispatchEvent(new CustomEvent('NATIVE_PERMISSIONS_STATUS', {
@@ -225,6 +242,33 @@ export default function App() {
           }
         })(); true;`;
         webViewRef.current?.injectJavaScript(jsCode);
+      }
+
+      if (parsed.type === 'TEST_NOTIFICATION_BLOCK') {
+        const testNotification = {
+          id: `simulasi-${Date.now()}`,
+          packageName: 'com.whatsapp',
+          appName: 'WhatsApp',
+          title: 'Dosen Pembimbing',
+          text: 'Halo, draf skripsi bab 3 kamu sudah saya review. Silakan cek catatan revisinya ya.',
+          receivedAt: Date.now(),
+        };
+
+        const jsCode = `(function() {
+          try {
+            window.dispatchEvent(new CustomEvent('NATIVE_NOTIFICATION_BLOCKED', {
+              detail: ${JSON.stringify(testNotification)}
+            }));
+          } catch (e) {
+            console.error('Error dispatching TEST_NOTIFICATION_BLOCK:', e);
+          }
+        })(); true;`;
+        webViewRef.current?.injectJavaScript(jsCode);
+
+        ToastAndroid.show(
+          'Simulasi Notifikasi WhatsApp berhasil dikirim ke layar Mode Fokus!',
+          ToastAndroid.SHORT
+        );
       }
     } catch (err) {
       console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);
@@ -260,6 +304,11 @@ export default function App() {
             const heldNotifs = FocusEnforcement.isNativeAvailable()
               ? FocusEnforcement.getHeldNotifications()
               : [];
+
+            if (FocusEnforcement.isNativeAvailable()) {
+              FocusEnforcement.rebindNotificationListener();
+            }
+
             const jsCode = `(function() {
               try {
                 window.dispatchEvent(new CustomEvent('NATIVE_PERMISSIONS_STATUS', {

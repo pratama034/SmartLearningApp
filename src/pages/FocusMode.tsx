@@ -113,7 +113,7 @@ export default function FocusMode() {
     }
 
     triggerSync()
-    const interval = setInterval(triggerSync, 2500)
+    const interval = setInterval(triggerSync, 1200)
 
     function handleSyncNotifs(event: Event) {
       const customEvent = event as CustomEvent<Array<{

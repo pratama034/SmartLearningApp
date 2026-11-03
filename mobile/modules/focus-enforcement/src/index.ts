@@ -14,11 +14,13 @@ type FocusEnforcementModule = {
   isNativeAvailable(): boolean
   setFocusEnabled(enabled: boolean, blockedPackages: string[]): void
   setBlockedPackages(blockedPackages: string[]): void
+  rebindNotificationListener(): void
   isFocusEnabled(): boolean
   isAccessibilityEnabled(): boolean
   isNotificationAccessEnabled(): boolean
   openAccessibilitySettings(): void
   openNotificationSettings(): void
+  openBatteryOptimizationSettings(): void
   getHeldNotifications(): HeldNotification[]
   clearHeldNotifications(): void
 }
@@ -40,11 +42,13 @@ const FocusEnforcement: FocusEnforcementModule = {
   isNativeAvailable: () => nativeModule !== null,
   setFocusEnabled: (enabled, blockedPackages) => nativeModule?.setFocusEnabled(enabled, blockedPackages),
   setBlockedPackages: (blockedPackages) => nativeModule?.setBlockedPackages(blockedPackages),
+  rebindNotificationListener: () => nativeModule?.rebindNotificationListener(),
   isFocusEnabled: () => nativeModule?.isFocusEnabled() ?? false,
   isAccessibilityEnabled: () => nativeModule?.isAccessibilityEnabled() ?? false,
   isNotificationAccessEnabled: () => nativeModule?.isNotificationAccessEnabled() ?? false,
   openAccessibilitySettings: () => nativeModule?.openAccessibilitySettings(),
   openNotificationSettings: () => nativeModule?.openNotificationSettings(),
+  openBatteryOptimizationSettings: () => nativeModule?.openBatteryOptimizationSettings(),
   getHeldNotifications: () => nativeModule?.getHeldNotifications() ?? [],
   clearHeldNotifications: () => nativeModule?.clearHeldNotifications(),
 }

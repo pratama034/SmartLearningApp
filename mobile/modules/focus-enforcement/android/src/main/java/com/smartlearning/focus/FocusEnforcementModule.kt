@@ -3,7 +3,10 @@ package com.smartlearning.focus
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.text.TextUtils
 import com.facebook.react.bridge.ReactContext
 import expo.modules.kotlin.modules.Module
@@ -13,6 +16,15 @@ class FocusEnforcementModule : Module() {
 
   companion object {
     var reactContext: ReactContext? = null
+
+    fun rebindListener(context: Context) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        runCatching {
+          val component = ComponentName(context.packageName, "${context.packageName}.FocusNotificationListener")
+          NotificationListenerService.requestRebind(component)
+        }
+      }
+    }
   }
 
   override fun definition() = ModuleDefinition {
@@ -21,11 +33,15 @@ class FocusEnforcementModule : Module() {
     OnCreate {
       val ctx = appContext.reactContext as? ReactContext
       reactContext = ctx
-      runCatching {
-        val listenerClass = Class.forName("${appContext.reactContext?.packageName}.FocusNotificationListener")
-        val field = listenerClass.getDeclaredField("reactContext")
-        field.isAccessible = true
-        field.set(null, ctx)
+      val context = appContext.reactContext
+      if (context != null) {
+        runCatching {
+          val listenerClass = Class.forName("${context.packageName}.FocusNotificationListener")
+          val field = listenerClass.getDeclaredField("reactContext")
+          field.isAccessible = true
+          field.set(null, ctx)
+        }
+        rebindListener(context)
       }
     }
 
@@ -41,6 +57,9 @@ class FocusEnforcementModule : Module() {
           field.set(null, ctx)
         }
         FocusPrefs.setFocus(context, enabled, blockedPackages)
+        if (enabled) {
+          rebindListener(context)
+        }
       }
       true
     }
@@ -57,6 +76,15 @@ class FocusEnforcementModule : Module() {
           field.set(null, ctx)
         }
         FocusPrefs.setBlockedPackages(context, blockedPackages)
+        rebindListener(context)
+      }
+      true
+    }
+
+    Function("rebindNotificationListener") {
+      val context = appContext.reactContext
+      if (context != null) {
+        rebindListener(context)
       }
       true
     }
@@ -135,6 +163,22 @@ class FocusEnforcementModule : Module() {
         activity.startActivity(intent)
       } else {
         appContext.reactContext?.startActivity(intent)
+      }
+      true
+    }
+
+    Function("openBatteryOptimizationSettings") {
+      val context = appContext.reactContext
+      if (context != null) {
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val activity = appContext.currentActivity
+        if (activity != null) {
+          activity.startActivity(intent)
+        } else {
+          context.startActivity(intent)
+        }
       }
       true
     }

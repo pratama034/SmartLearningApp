@@ -365,9 +365,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   addHeldNotification: (notification) =>
-    set((state) => ({
-      heldNotifications: [...state.heldNotifications, notification],
-    })),
+    set((state) => {
+      if (state.heldNotifications.some((n) => n.id === notification.id)) {
+        return state
+      }
+      return {
+        heldNotifications: [...state.heldNotifications, notification],
+      }
+    }),
 
   tick: () =>
     set((state) => {

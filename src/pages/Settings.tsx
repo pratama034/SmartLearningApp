@@ -175,6 +175,28 @@ export default function Settings() {
     }
   }
 
+  function handleOpenBatterySettings() {
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({ type: 'OPEN_BATTERY_SETTINGS' })
+      )
+    } else {
+      setErrorToast('Fitur ini memerlukan aplikasi Android Smart Focus.')
+    }
+  }
+
+  function handleTestNotification() {
+    if (typeof window !== 'undefined' && window.ReactNativeWebView?.postMessage) {
+      window.ReactNativeWebView.postMessage(
+        JSON.stringify({ type: 'TEST_NOTIFICATION_BLOCK' })
+      )
+      setSuccessToastMessage('Sinyal uji coba simulasi notifikasi dikirim ke HP!')
+      setShowSuccessToast(true)
+    } else {
+      setErrorToast('Fitur ini memerlukan aplikasi Android Smart Focus.')
+    }
+  }
+
   if (user?.id !== prevUserId) {
     setPrevUserId(user?.id)
     setName(user?.name || '')
@@ -669,6 +691,22 @@ export default function Settings() {
               >
                 <span>Izin Aksesibilitas</span>
                 <ExternalLink size={12} className="opacity-70" />
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenBatterySettings}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#DFE4F1] bg-white px-3 py-2 text-xs font-semibold text-[#1F2C4F] shadow-xs transition hover:bg-[#F3F4FA] active:scale-[0.98]"
+                title="Khusus Samsung: Nonaktifkan optimasi baterai agar Android tidak mematikan pemblokir di latar belakang"
+              >
+                <span>Baterai Tanpa Batas</span>
+                <ExternalLink size={12} className="opacity-70" />
+              </button>
+              <button
+                type="button"
+                onClick={handleTestNotification}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#FCDDE6] bg-[#FFF7F8] px-3 py-2 text-xs font-bold text-[#8E1744] shadow-xs transition hover:bg-[#FDEBF0] active:scale-[0.98]"
+              >
+                <span>Uji Simulasi Notifikasi</span>
               </button>
             </div>
           </div>
