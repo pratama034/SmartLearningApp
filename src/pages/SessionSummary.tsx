@@ -1,95 +1,64 @@
 import {
   AlertCircle,
+  BarChart3,
+  BellOff,
   BellRing,
   CheckCircle2,
   Clock3,
-  Flame,
+  LayoutDashboard,
   Loader2,
-  NotebookPen,
   Sparkles,
+  Trophy,
   X,
 } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { z } from 'zod'
-import { useAuthStore } from '../store/authStore'
-import { useSessionStore, type SessionSummary as SessionSummaryData } from '../store/sessionStore'
-
-const reflectionSchema = z.object({
-  reflection: z.string().trim().min(1, 'Refleksi tidak boleh kosong.'),
-})
+import { stopTimerAlarm, subscribeAlarmState } from '../lib/stufoSync'
+import { useSessionStore } from '../store/sessionStore'
 
 function formatDuration(seconds: number) {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const remainder = seconds % 60
-  return hours
-    ? `${hours}j ${String(minutes).padStart(2, '0')}m`
-    : `${minutes}m ${String(remainder).padStart(2, '0')}d`
+  const safe = Math.max(1, seconds)
+  const hours = Math.floor(safe / 3600)
+  const minutes = Math.floor((safe % 3600) / 60)
+  const remainder = safe % 60
+  if (hours > 0) {
+    return `${hours}j ${String(minutes).padStart(2, '0')}m`
+  }
+  if (minutes > 0) {
+    return remainder > 0 ? `${minutes}m ${String(remainder).padStart(2, '0')}d` : `${minutes} menit`
+  }
+  return `${remainder} detik`
 }
 
 export default function SessionSummary() {
   const navigate = useNavigate()
-  const user = useAuthStore((state) => state.user)
-  const storeSummary = useSessionStore((state) => state.lastSessionSummary)
-  const lastSavedSessionId = useSessionStore((state) => state.lastSavedSessionId)
+  const summary = useSessionStore((state) => state.lastSessionSummary)
   const isSaving = useSessionStore((state) => state.isSaving)
   const storeError = useSessionStore((state) => state.error)
   const clearError = useSessionStore((state) => state.clearError)
-  const saveSessionToDatabase = useSessionStore((state) => state.saveSessionToDatabase)
   const resetSession = useSessionStore((state) => state.resetSession)
 
-  const [completedSnapshot, setCompletedSnapshot] = useState<SessionSummaryData | null>(null)
-  const [reflection, setReflection] = useState('')
-  const [formError, setFormError] = useState('')
-  const [showSuccessToast, setShowSuccessToast] = useState(false)
+  const [isAlarmRinging, setIsAlarmRinging] = useState(false)
 
-  const summary = storeSummary ?? completedSnapshot
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setFormError('')
-    clearError()
-
-    const validation = reflectionSchema.safeParse({ reflection })
-    if (!validation.success) {
-      setFormError(validation.error.issues[0]?.message ?? 'Refleksi tidak boleh kosong.')
-      return
+  useEffect(() => {
+    const unsubscribe = subscribeAlarmState((playing) => {
+      setIsAlarmRinging(playing)
+    })
+    return () => {
+      unsubscribe()
     }
+  }, [])
 
-    if (!summary) return
-
-    setCompletedSnapshot(summary)
-
-    try {
-      await saveSessionToDatabase({
-        sessionId: summary.sessionId ?? lastSavedSessionId,
-        userId: user?.id,
-        studyBlockId: summary.block?.id ?? null,
-        targetDuration: summary.targetDurationSeconds,
-        actualDuration: summary.durationSeconds,
-        completionStatus: summary.completionStatus,
-        reflectionNote: validation.data.reflection,
-        startedAt: summary.startedAt,
-        endedAt: summary.endedAt,
-      })
-
-      resetSession()
-      setShowSuccessToast(true)
-
-      window.setTimeout(() => {
-        navigate('/dashboard', { replace: true })
-      }, 1400)
-    } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : 'Gagal memperbarui catatan refleksi di Supabase.'
-      setFormError(msg)
-    }
-  }
-
-  function handleSkipReflection() {
+  function handleGoToDashboard() {
+    stopTimerAlarm()
     resetSession()
     navigate('/dashboard', { replace: true })
+  }
+
+  function handleGoToReports() {
+    stopTimerAlarm()
+    resetSession()
+    navigate('/reports', { replace: true })
   }
 
   if (!summary) {
@@ -97,7 +66,7 @@ export default function SessionSummary() {
       <section className="rounded-2xl border border-[#DFE4F1] bg-white p-6 text-center shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
         <h1 className="text-[22px] font-extrabold text-[#1F2C4F]">Belum ada ringkasan sesi</h1>
         <p className="mt-2 text-sm leading-5 text-[#56638A]">
-          Mulai dan akhiri sesi fokus untuk melihat refleksimu di sini.
+          Mulai dan akhiri sesi fokus untuk melihat hasil pencatatan durasimu di sini.
         </p>
         <button
           type="button"
@@ -112,43 +81,76 @@ export default function SessionSummary() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 sm:space-y-6">
-      {/* Notifikasi Timer Selesai */}
-      {summary.timerCompletedNotification && (
+      {/* Banner Alarm Berbunyi (Bisa dimatikan kapan saja atau berhenti sendiri setelah 12 detik) */}
+      {(isAlarmRinging || summary.timerCompletedNotification) && (
         <div
           role="status"
           aria-live="assertive"
-          className="flex items-center gap-3 rounded-2xl border border-[#1D3668]/20 bg-[#E1EAF8] p-4 text-[#1D3668] shadow-sm"
-        >
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#1D3668] text-white">
-            <BellRing size={20} className="animate-bounce" />
-          </span>
-          <div>
-            <p className="text-sm font-extrabold">⏰ Waktu Timer Fokus Telah Selesai! 🎉</p>
-            <p className="text-xs text-[#1F2C4F]/85">
-              Durasi belajarmu untuk <strong>{summary.block.title}</strong> sudah otomatis disimpan
-              ke Laporan dan Leaderboard Teman.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {showSuccessToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center justify-between gap-3 rounded-xl border border-[#17623A]/20 bg-[#D6F0DE] p-4 text-[#17623A] shadow-md transition-all"
+          className={`flex flex-col gap-3 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${
+            isAlarmRinging
+              ? 'border-[#BE2257]/30 bg-[#FFF0F5] text-[#8E1744]'
+              : 'border-[#1D3668]/20 bg-[#E1EAF8] text-[#1D3668]'
+          }`}
         >
           <div className="flex items-center gap-3">
-            <CheckCircle2 size={20} className="shrink-0 text-[#17623A]" aria-hidden="true" />
+            <span
+              className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl text-white ${
+                isAlarmRinging ? 'bg-[#BE2257]' : 'bg-[#1D3668]'
+              }`}
+            >
+              <BellRing size={20} className={isAlarmRinging ? 'animate-bounce' : ''} />
+            </span>
             <div>
-              <p className="text-sm font-extrabold">Sesi berhasil disimpan!</p>
-              <p className="text-xs font-medium text-[#17623A]/90">
-                Mengarahkan kembali ke Dashboard...
+              <p className="text-sm font-extrabold">
+                {isAlarmRinging
+                  ? '🔔 Alarm Timer Fokus Sedang Berbunyi!'
+                  : '⏰ Waktu Timer Fokus Telah Selesai! 🎉'}
+              </p>
+              <p className="mt-0.5 text-xs opacity-90">
+                Durasi belajarmu untuk <strong>{summary.block.title}</strong> sudah langsung otomatis
+                disimpan ke Laporan &amp; Leaderboard Teman.
               </p>
             </div>
           </div>
+
+          {isAlarmRinging && (
+            <button
+              type="button"
+              onClick={() => stopTimerAlarm()}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#BE2257] px-4 text-xs font-extrabold text-white shadow-sm transition hover:bg-[#A11B48] active:scale-[0.98]"
+            >
+              <BellOff size={15} />
+              <span>Matikan Alarm</span>
+            </button>
+          )}
         </div>
       )}
+
+      {/* Banner Konfirmasi Otomatis Tersimpan (Tanpa Refleksi) */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center justify-between gap-3 rounded-2xl border border-[#17623A]/20 bg-[#D6F0DE] p-4 text-[#17623A] shadow-xs"
+      >
+        <div className="flex items-center gap-3">
+          {isSaving ? (
+            <Loader2 size={22} className="shrink-0 animate-spin text-[#17623A]" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 size={22} className="shrink-0 text-[#17623A]" aria-hidden="true" />
+          )}
+          <div>
+            <p className="text-sm font-extrabold">
+              {isSaving
+                ? 'Menyimpan durasi fokus secara otomatis ke Cloud...'
+                : 'Durasi fokus berhasil tercatat secara otomatis!'}
+            </p>
+            <p className="text-xs font-medium text-[#17623A]/90">
+              Tanpa perlu mengisi form refleksi, waktu belajarmu langsung masuk ke grafik Laporan dan
+              Leaderboard Teman.
+            </p>
+          </div>
+        </div>
+      </div>
 
       {storeError && (
         <div
@@ -171,114 +173,72 @@ export default function SessionSummary() {
         </div>
       )}
 
+      {/* Ringkasan Sesi */}
       <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-6">
         <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">
-          Sesi selesai
+          Sesi Fokus Selesai
         </p>
         <h1 className="mt-1 text-[22px] font-extrabold leading-7 tracking-tight text-[#1F2C4F] sm:text-[28px] sm:leading-9">
-          Bagaimana fokusmu hari ini?
+          Kerja Bagus! Fokusmu Hari Ini Tercatat
         </h1>
         <p className="mt-2 text-[13px] leading-[19px] text-[#56638A]">
-          Ringkasan untuk <strong>{summary.block.title}</strong> sudah siap untuk direfleksikan.
+          Sesi <strong>{summary.block.title}</strong> telah diselesaikan dan disinkronkan secara
+          otomatis ke akun StuFo milikmu.
         </p>
-      </section>
 
-      <section aria-label="Statistik sesi" className="grid gap-3 sm:grid-cols-2">
-        <article className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
-            <Clock3 size={20} aria-hidden="true" />
-          </span>
-          <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
-            Durasi Fokus Aktual
-          </p>
-          <p className="mt-1 text-2xl font-extrabold tabular-nums text-[#1F2C4F]">
-            {formatDuration(summary.durationSeconds)}
-          </p>
-          <p className="mt-1 text-xs text-[#56638A]">
-            {summary.modeKind === 'stopwatch'
-              ? 'Mode Stopwatch (Hitung Maju)'
-              : `Target: ${formatDuration(summary.targetDurationSeconds)}`}
-          </p>
-        </article>
-
-        <article className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#D6F0DE] text-[#17623A]">
-            <Sparkles size={20} aria-hidden="true" />
-          </span>
-          <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
-            Status Penyelesaian
-          </p>
-          <p className="mt-1 text-2xl font-extrabold text-[#17623A]">
-            {summary.completionStatus === 'completed' ? 'Tuntas 100%' : 'Selesai Lebih Awal'}
-          </p>
-          <p className="mt-1 text-xs text-[#56638A]">
-            Tercatat ke grafik laporan &amp; leaderboard teman
-          </p>
-        </article>
-      </section>
-
-      <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-        <div className="flex items-center gap-2">
-          <NotebookPen size={19} className="text-[#1D3668]" aria-hidden="true" />
-          <h2 className="text-[18px] font-bold text-[#1F2C4F]">Jurnal refleksi</h2>
-        </div>
-        <form className="mt-4" onSubmit={handleSubmit} noValidate>
-          <label
-            htmlFor="session-reflection"
-            className="mb-2 block text-sm font-semibold text-[#1F2C4F]"
-          >
-            Apa yang berjalan baik dan apa yang perlu ditingkatkan?
-          </label>
-          <textarea
-            id="session-reflection"
-            value={reflection}
-            disabled={isSaving || showSuccessToast}
-            onChange={(event) => setReflection(event.target.value)}
-            rows={5}
-            aria-invalid={Boolean(formError)}
-            aria-describedby={formError ? 'reflection-error' : undefined}
-            placeholder="Tuliskan refleksimu di sini..."
-            className="w-full resize-y rounded-[10px] border border-[#DFE4F1] p-4 text-sm leading-5 text-[#1F2C4F] outline-none placeholder:text-[#56638A] focus:border-[#1D3668] focus:ring-2 focus:ring-[#1D3668] disabled:cursor-not-allowed disabled:bg-[#F6F7FC] disabled:opacity-70"
-          />
-          {formError && (
-            <p id="reflection-error" role="alert" className="mt-2 text-sm font-medium text-[#BA1A1A]">
-              {formError}
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <article className="rounded-2xl border border-[#DFE4F1] bg-[#F9FAFE] p-5">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
+              <Clock3 size={20} aria-hidden="true" />
+            </span>
+            <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
+              Durasi Fokus Tercatat
             </p>
-          )}
-          <p className="mt-2 text-xs text-[#56638A]">
-            Laporan durasi fokus &amp; poin streak telah tercatat otomatis. Isi refleksi di atas
-            untuk memperbarui catatan sesi ini.
-          </p>
-          <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
-            <button
-              type="submit"
-              disabled={isSaving || showSuccessToast}
-              className="flex h-[46px] flex-1 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" aria-hidden="true" />
-                  <span>Memperbarui Refleksi...</span>
-                </>
-              ) : showSuccessToast ? (
-                <>
-                  <Flame size={18} className="fill-white text-white animate-bounce" aria-hidden="true" />
-                  <span>Refleksi berhasil diperbarui! 🔥</span>
-                </>
-              ) : (
-                <span>Simpan Refleksi &amp; Kembali ke Dashboard</span>
-              )}
-            </button>
-            <button
-              type="button"
-              disabled={isSaving || showSuccessToast}
-              onClick={handleSkipReflection}
-              className="flex h-[46px] items-center justify-center rounded-[10px] border border-[#DFE4F1] bg-white px-5 text-sm font-bold text-[#56638A] transition hover:bg-[#F6F7FC] hover:text-[#1D3668] disabled:opacity-50"
-            >
-              Lewati &amp; ke Dashboard
-            </button>
-          </div>
-        </form>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums text-[#1F2C4F]">
+              {formatDuration(summary.durationSeconds)}
+            </p>
+            <p className="mt-1 text-xs text-[#56638A]">
+              {summary.modeKind === 'stopwatch'
+                ? 'Mode Stopwatch (Hitung Maju)'
+                : `Target: ${formatDuration(summary.targetDurationSeconds)}`}
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-[#DFE4F1] bg-[#F9FAFE] p-5">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#D6F0DE] text-[#17623A]">
+              <Sparkles size={20} aria-hidden="true" />
+            </span>
+            <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
+              Status Pencatatan
+            </p>
+            <p className="mt-1 text-2xl font-extrabold text-[#17623A]">
+              {summary.completionStatus === 'completed' ? 'Tuntas 100%' : 'Tersimpan Otomatis'}
+            </p>
+            <p className="mt-1 text-xs text-[#56638A]">
+              Langsung tersinkron ke Grafik Laporan &amp; Leaderboard Teman
+            </p>
+          </article>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={handleGoToReports}
+            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#BE2257] px-5 text-sm font-extrabold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] active:scale-[0.99]"
+          >
+            <Trophy size={17} />
+            <BarChart3 size={17} />
+            <span>Lihat Laporan &amp; Leaderboard Teman</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleGoToDashboard}
+            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#1D3668] px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-[#162B54] active:scale-[0.99]"
+          >
+            <LayoutDashboard size={17} />
+            <span>Kembali ke Dashboard</span>
+          </button>
+        </div>
       </section>
     </div>
   )

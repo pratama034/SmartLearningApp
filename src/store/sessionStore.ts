@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { syncUserMemberMetaToSupabase } from '../lib/stufoSync'
 import { useAuthStore } from './authStore'
 import { useGroupStore } from './groupStore'
 import { useStudyStore } from './studyStore'
@@ -77,7 +78,10 @@ function timeToSeconds(value: string) {
   return (hours * 60 + minutes) * 60
 }
 
-async function syncMemberFocusState(status: 'fokus' | 'istirahat', courseTitle?: string) {
+async function syncMemberFocusState(
+  status: 'fokus' | 'istirahat',
+  startedAtIso?: string | null
+) {
   try {
     let currentUserId = useAuthStore.getState().user?.id
     if (!currentUserId) {
@@ -87,28 +91,14 @@ async function syncMemberFocusState(status: 'fokus' | 'istirahat', courseTitle?:
     if (!currentUserId) return
 
     useGroupStore.getState().syncUserStatus(currentUserId, status)
-    const nowIso = new Date().toISOString()
 
-    // Coba update dengan focus_started_at terlebih dahulu, fallback jika kolom belum ada
-    const payloadWithTimestamp: Record<string, unknown> = {
+    const userMajor = useAuthStore.getState().user?.major
+    await syncUserMemberMetaToSupabase({
+      userId: currentUserId,
       status,
-      focus_started_at: status === 'fokus' ? nowIso : null,
-    }
-    if (courseTitle) {
-      payloadWithTimestamp.course = courseTitle
-    }
-
-    const { error } = await supabase
-      .from('study_group_members')
-      .update(payloadWithTimestamp)
-      .eq('user_id', currentUserId)
-
-    if (error) {
-      await supabase
-        .from('study_group_members')
-        .update({ status })
-        .eq('user_id', currentUserId)
-    }
+      startedAtIso: status === 'fokus' ? startedAtIso || new Date().toISOString() : null,
+      courseOverride: userMajor,
+    })
   } catch (err) {
     console.warn('[syncMemberFocusState] Error update study_group_members:', err)
   }
@@ -134,6 +124,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const startVal = block.startTime ?? block.start_time
     const endVal = block.endTime ?? block.end_time
     const duration = Math.max(60, timeToSeconds(endVal) - timeToSeconds(startVal))
+    const nowIso = new Date().toISOString()
 
     set({
       activeBlock: block,
@@ -142,19 +133,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       remainingTime: duration,
       elapsedSeconds: 0,
       targetDurationSeconds: duration,
-      startedAt: new Date().toISOString(),
+      startedAt: nowIso,
       heldNotifications: [],
       lastSavedSessionId: null,
       error: null,
     })
 
-    void syncMemberFocusState('fokus', block.title)
+    void syncMemberFocusState('fokus', nowIso)
   },
 
   startSpontaneousTimer: (durationMinutes: number, customTitle?: string) => {
     const safeMinutes = Math.max(1, Math.min(360, Math.round(durationMinutes || 25)))
     const durationSeconds = safeMinutes * 60
     const now = new Date()
+    const nowIso = now.toISOString()
     const end = new Date(now.getTime() + durationSeconds * 1000)
     const fmt = (d: Date) =>
       `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -165,7 +157,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       title: customTitle?.trim() || `Timer Fokus Spontan (${safeMinutes} Menit)`,
       type: 'Belajar mandiri',
       description: 'Sesi Timer Fokus Spontan tanpa jadwal',
-      date: now.toISOString().slice(0, 10),
+      date: nowIso.slice(0, 10),
       start_time: fmt(now),
       startTime: fmt(now),
       end_time: fmt(end),
@@ -184,17 +176,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       remainingTime: durationSeconds,
       elapsedSeconds: 0,
       targetDurationSeconds: durationSeconds,
-      startedAt: now.toISOString(),
+      startedAt: nowIso,
       heldNotifications: [],
       lastSavedSessionId: null,
       error: null,
     })
 
-    void syncMemberFocusState('fokus', spontaneousBlock.title)
+    void syncMemberFocusState('fokus', nowIso)
   },
 
   startSpontaneousStopwatch: (customTitle?: string) => {
     const now = new Date()
+    const nowIso = now.toISOString()
     const fmt = (d: Date) =>
       `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 
@@ -204,7 +197,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       title: customTitle?.trim() || 'Stopwatch Fokus Spontan',
       type: 'Belajar mandiri',
       description: 'Sesi Stopwatch Fokus Spontan (Hitung Maju)',
-      date: now.toISOString().slice(0, 10),
+      date: nowIso.slice(0, 10),
       start_time: fmt(now),
       startTime: fmt(now),
       end_time: fmt(now),
@@ -223,13 +216,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       remainingTime: 0,
       elapsedSeconds: 0,
       targetDurationSeconds: 0,
-      startedAt: now.toISOString(),
+      startedAt: nowIso,
       heldNotifications: [],
       lastSavedSessionId: null,
       error: null,
     })
 
-    void syncMemberFocusState('fokus', spontaneousBlock.title)
+    void syncMemberFocusState('fokus', nowIso)
   },
 
   startFocus: (block) => {
@@ -255,9 +248,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     }
 
-    await syncMemberFocusState('istirahat')
-
     if (!state.activeBlock) {
+      await syncMemberFocusState('istirahat', null)
       return state.lastSavedSessionId
     }
 
@@ -305,9 +297,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       heldNotifications: [],
       lastSessionSummary: summarySnapshot,
       lastSavedSessionId: null,
+      isSaving: true,
     })
 
     if (!currentUserId) {
+      set({ isSaving: false })
       return null
     }
 
@@ -328,9 +322,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     const dbBlockId = isSpontaneous ? null : summarySnapshot.block.id ?? null
+    let savedId: string | null = null
 
     try {
-      const dbPayload = {
+      // 1. Coba insert lengkap dengan started_at & ended_at
+      const fullPayload = {
         user_id: currentUserId,
         study_block_id: dbBlockId,
         target_duration: summarySnapshot.targetDurationSeconds,
@@ -343,24 +339,59 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       const { data: insertedRow, error: insertError } = await supabase
         .from('focus_sessions')
-        .insert(dbPayload)
+        .insert(fullPayload)
         .select('id')
         .single<{ id: string }>()
 
       if (!insertError && insertedRow?.id) {
+        savedId = insertedRow.id
+      } else {
+        // 2. Fallback tanpa started_at / ended_at jika skema tabel lama belum memiliki kolom tersebut
+        const fallbackPayload = {
+          user_id: currentUserId,
+          study_block_id: dbBlockId,
+          target_duration: summarySnapshot.targetDurationSeconds,
+          actual_duration: summarySnapshot.durationSeconds,
+          completion_status: summarySnapshot.completionStatus,
+          reflection_note: '',
+        }
+        const { data: fallbackRow, error: fallbackError } = await supabase
+          .from('focus_sessions')
+          .insert(fallbackPayload)
+          .select('id')
+          .single<{ id: string }>()
+
+        if (!fallbackError && fallbackRow?.id) {
+          savedId = fallbackRow.id
+        }
+      }
+
+      if (savedId) {
         set((prev) => ({
-          lastSavedSessionId: insertedRow.id,
+          lastSavedSessionId: savedId,
           lastSessionSummary: prev.lastSessionSummary
-            ? { ...prev.lastSessionSummary, sessionId: insertedRow.id }
+            ? { ...prev.lastSessionSummary, sessionId: savedId }
             : null,
         }))
-        return insertedRow.id
       }
     } catch (err) {
-      console.error('[stopFocus] Gagal menyimpan laporan sesi awal:', err)
+      console.error('[stopFocus] Gagal menyimpan sesi fokus otomatis:', err)
+    } finally {
+      set({ isSaving: false })
     }
 
-    return null
+    // 3. Sinkronkan status 'istirahat' + total durasi terbaru ke study_group_members & broadcast realtime
+    await syncUserMemberMetaToSupabase({
+      userId: currentUserId,
+      status: 'istirahat',
+      startedAtIso: null,
+      courseOverride: useAuthStore.getState().user?.major,
+      extraSeconds: savedId ? 0 : summarySnapshot.durationSeconds,
+      extraSessions: savedId ? 0 : 1,
+    })
+    useGroupStore.getState().syncUserStatus(currentUserId, 'istirahat')
+
+    return savedId
   },
 
   endSession: () => {
@@ -368,7 +399,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   resetSession: () => {
-    void syncMemberFocusState('istirahat')
+    void syncMemberFocusState('istirahat', null)
     set({
       activeBlock: null,
       modeKind: 'scheduled',
@@ -395,85 +426,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     }),
 
-  tick: () =>
-    set((state) => {
-      if (state.status !== 'running') return state
-      if (state.modeKind === 'stopwatch') {
-        const nextElapsed = state.elapsedSeconds + 1
-        return {
-          elapsedSeconds: nextElapsed,
-          remainingTime: nextElapsed,
-        }
-      }
-      if (state.remainingTime <= 0) return state
-      return {
-        remainingTime: state.remainingTime - 1,
-        elapsedSeconds: state.elapsedSeconds + 1,
-      }
-    }),
+  tick: () => {
+    const prevState = get()
+    if (prevState.status !== 'running') return
 
-  saveSessionToDatabase: async (sessionData: SaveSessionPayload) => {
-    set({ isSaving: true, error: null })
+    const nextElapsed = prevState.elapsedSeconds + 1
 
-    const resolvedUserId = sessionData.userId || useAuthStore.getState().user?.id
-    if (!resolvedUserId) {
-      const msg = 'Sesi pengguna tidak ditemukan. Silakan masuk terlebih dahulu.'
-      set({ isSaving: false, error: msg })
-      throw new Error(msg)
+    if (prevState.modeKind === 'stopwatch') {
+      set({
+        elapsedSeconds: nextElapsed,
+        remainingTime: nextElapsed,
+      })
+    } else if (prevState.remainingTime > 0) {
+      set({
+        remainingTime: prevState.remainingTime - 1,
+        elapsedSeconds: nextElapsed,
+      })
     }
 
-    const existingSessionId =
-      sessionData.sessionId ||
-      get().lastSavedSessionId ||
-      get().lastSessionSummary?.sessionId ||
-      null
-
-    try {
-      if (existingSessionId) {
-        const { error: updateError } = await supabase
-          .from('focus_sessions')
-          .update({
-            reflection_note: sessionData.reflectionNote.trim(),
-          })
-          .eq('id', existingSessionId)
-          .eq('user_id', resolvedUserId)
-
-        if (updateError) {
-          throw new Error(updateError.message)
-        }
-
-        get().resetSession()
-        return
+    // Setiap 15 detik saat sedang fokus, sinkronkan detak fokus ke study_group_members & broadcast
+    if (nextElapsed > 0 && nextElapsed % 15 === 0) {
+      const uid = useAuthStore.getState().user?.id
+      if (uid) {
+        void syncUserMemberMetaToSupabase({
+          userId: uid,
+          status: 'fokus',
+          startedAtIso: prevState.startedAt,
+          courseOverride: useAuthStore.getState().user?.major,
+        })
       }
-
-      const rawBlockId = sessionData.studyBlockId
-      const safeBlockId =
-        rawBlockId && !rawBlockId.startsWith('spontaneous-') ? rawBlockId : null
-
-      const dbPayload = {
-        user_id: resolvedUserId,
-        study_block_id: safeBlockId,
-        target_duration: sessionData.targetDuration,
-        actual_duration: sessionData.actualDuration,
-        completion_status: sessionData.completionStatus,
-        reflection_note: sessionData.reflectionNote.trim(),
-      }
-
-      const { error: insertError } = await supabase.from('focus_sessions').insert(dbPayload)
-      if (insertError) {
-        throw new Error(insertError.message)
-      }
-
-      get().resetSession()
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Gagal menyimpan jurnal refleksi ke Supabase.'
-      set({ isSaving: false, error: message })
-      throw new Error(message)
-    } finally {
-      set({ isSaving: false })
     }
+  },
+
+  saveSessionToDatabase: async () => {
+    // Sesi kini sudah otomatis tersimpan saat stopFocus dipanggil (tanpa jurnal refleksi)
+    get().resetSession()
   },
 }))

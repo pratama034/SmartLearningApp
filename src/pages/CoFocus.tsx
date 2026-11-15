@@ -2,6 +2,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
+  BellOff,
   Check,
   CheckCircle2,
   Copy,
@@ -12,7 +13,6 @@ import {
   PlusCircle,
   ShieldCheck,
   Trash2,
-  UserMinus,
   Users,
   UsersRound,
   X,
@@ -21,13 +21,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { useGroupStore, type GroupMemberItem } from '../store/groupStore'
+import { useGroupStore, type StudyGroupItem } from '../store/groupStore'
 import { useSessionStore } from '../store/sessionStore'
-
-const statusStyles: Record<'Sedang Fokus' | 'Istirahat', string> = {
-  'Sedang Fokus': 'bg-[#FCDDE6] text-[#8E1744]',
-  Istirahat: 'bg-[#FDEBC8] text-[#7A4B00]',
-}
 
 export default function CoFocus() {
   const navigate = useNavigate()
@@ -35,7 +30,10 @@ export default function CoFocus() {
   // Session & Local settings
   const [isSharing, setIsSharing] = useState(() => {
     try {
-      return typeof window !== 'undefined' && window.localStorage.getItem('smartlearning-cofocus-sharing') !== 'false'
+      return (
+        typeof window !== 'undefined' &&
+        window.localStorage.getItem('smartlearning-cofocus-sharing') !== 'false'
+      )
     } catch {
       return true
     }
@@ -43,7 +41,8 @@ export default function CoFocus() {
   const [autoReply, setAutoReply] = useState(() => {
     try {
       return (
-        (typeof window !== 'undefined' && window.localStorage.getItem('smartlearning-cofocus-auto-reply')) ||
+        (typeof window !== 'undefined' &&
+          window.localStorage.getItem('smartlearning-cofocus-auto-reply')) ||
         'Sedang fokus belajar modul Manajemen Inovasi. Balasan menyusul setelah sesi tuntas.'
       )
     } catch {
@@ -51,14 +50,14 @@ export default function CoFocus() {
     }
   })
   const sessionStatus = useSessionStore((state) => state.status)
-  const ownStatus = sessionStatus === 'running' || sessionStatus === 'paused' ? 'Sedang Fokus' : 'Tersedia'
+  const ownStatus =
+    sessionStatus === 'running' || sessionStatus === 'paused' ? 'Sedang Fokus' : 'Tersedia'
 
   // Auth & User
   const user = useAuthStore((state) => state.user)
 
   // Group Store state & actions
   const groups = useGroupStore((state) => state.groups)
-  const activeGroupId = useGroupStore((state) => state.activeGroupId)
   const activeGroup = useGroupStore((state) => state.activeGroup)
   const isLoadingGroups = useGroupStore((state) => state.isLoading)
   const setActiveGroup = useGroupStore((state) => state.setActiveGroup)
@@ -67,7 +66,6 @@ export default function CoFocus() {
   const fetchMyGroups = useGroupStore((state) => state.fetchMyGroups)
   const deleteGroup = useGroupStore((state) => state.deleteGroup)
   const leaveGroup = useGroupStore((state) => state.leaveGroup)
-  const kickMember = useGroupStore((state) => state.kickMember)
 
   useEffect(() => {
     if (!user?.id) return
@@ -83,9 +81,23 @@ export default function CoFocus() {
             useGroupStore
               .getState()
               .handleMemberUpdate(
-                payload.new as { id?: string; user_id?: string; group_id?: string; status?: string; course?: string | null }
+                payload.new as {
+                  id?: string
+                  user_id?: string
+                  group_id?: string
+                  status?: string
+                  course?: string | null
+                }
               )
           }
+          void fetchMyGroups(user.id)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'group_chat_messages' },
+        () => {
+          // Segarkan daftar grup agar preview pesan terakhir & angka pesan belum dibaca ter-update ala WhatsApp
           void fetchMyGroups(user.id)
         }
       )
@@ -106,9 +118,8 @@ export default function CoFocus() {
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [showLeaveModal, setShowLeaveModal] = useState(false)
-  const [memberToKick, setMemberToKick] = useState<GroupMemberItem | null>(null)
+  const [groupToDelete, setGroupToDelete] = useState<StudyGroupItem | null>(null)
+  const [groupToLeave, setGroupToLeave] = useState<StudyGroupItem | null>(null)
   const [newRoomName, setNewRoomName] = useState('')
   const [createdRoomCode, setCreatedRoomCode] = useState<string | null>(null)
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null)
@@ -150,16 +161,15 @@ export default function CoFocus() {
       if (e.key === 'Escape') {
         if (showCreateModal) setShowCreateModal(false)
         if (showJoinModal) setShowJoinModal(false)
-        if (showDeleteModal) setShowDeleteModal(false)
-        if (showLeaveModal) setShowLeaveModal(false)
-        if (memberToKick) setMemberToKick(null)
+        if (groupToDelete) setGroupToDelete(null)
+        if (groupToLeave) setGroupToLeave(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showCreateModal, showJoinModal, showDeleteModal, showLeaveModal, memberToKick])
+  }, [showCreateModal, showJoinModal, groupToDelete, groupToLeave])
 
-  // Safe clipboard copy with fallback
+  // Safe clipboard copy with fallback (untuk modal setelah buat ruang baru)
   const handleCopy = async (code?: string | null) => {
     if (!code) return
     try {
@@ -208,7 +218,8 @@ export default function CoFocus() {
     } catch (error) {
       setToast({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Terjadi kesalahan saat membuat ruang belajar.',
+        message:
+          error instanceof Error ? error.message : 'Terjadi kesalahan saat membuat ruang belajar.',
       })
     } finally {
       setIsSubmitting(false)
@@ -256,23 +267,13 @@ export default function CoFocus() {
     }
   }
 
-  const currentMembers: GroupMemberItem[] = activeGroup?.members || []
-  const maxMembers = activeGroup?.maxMembers && activeGroup.maxMembers >= 10 ? activeGroup.maxMembers : 10
-  const remainingSlots = Math.max(0, maxMembers - currentMembers.length)
-  const roomJoinCode = activeGroup?.joinCode || ''
-
-  const isHost = Boolean(
-    (user?.id && activeGroup?.hostId === user.id) ||
-    currentMembers.some((m) => m.userId === user?.id && m.isHost)
-  )
-
   async function handleDeleteRoom() {
-    if (!activeGroup?.id) return
+    if (!groupToDelete?.id) return
     setIsSubmitting(true)
     try {
-      const res = await deleteGroup(activeGroup.id)
+      const res = await deleteGroup(groupToDelete.id)
       if (res.success) {
-        setShowDeleteModal(false)
+        setGroupToDelete(null)
         setToast({ type: 'success', message: 'Ruang belajar berhasil dihapus.' })
       } else {
         setToast({ type: 'error', message: res.error || 'Gagal menghapus ruang belajar.' })
@@ -286,12 +287,12 @@ export default function CoFocus() {
   }
 
   async function handleLeaveRoom() {
-    if (!activeGroup?.id) return
+    if (!groupToLeave?.id) return
     setIsSubmitting(true)
     try {
-      const res = await leaveGroup(activeGroup.id)
+      const res = await leaveGroup(groupToLeave.id)
       if (res.success) {
-        setShowLeaveModal(false)
+        setGroupToLeave(null)
         setToast({ type: 'success', message: 'Berhasil keluar dari ruang belajar.' })
       } else {
         setToast({ type: 'error', message: res.error || 'Gagal keluar dari ruang belajar.' })
@@ -304,23 +305,10 @@ export default function CoFocus() {
     }
   }
 
-  async function handleConfirmKick() {
-    if (!activeGroup?.id || !memberToKick?.userId) return
-    setIsSubmitting(true)
-    try {
-      const res = await kickMember(activeGroup.id, memberToKick.userId)
-      if (res.success) {
-        setToast({ type: 'success', message: `${memberToKick.name} berhasil dikeluarkan dari grup.` })
-        setMemberToKick(null)
-      } else {
-        setToast({ type: 'error', message: res.error || 'Gagal mengeluarkan anggota.' })
-      }
-    } catch (err) {
-      console.error(err)
-      setToast({ type: 'error', message: 'Terjadi kesalahan saat mengeluarkan anggota.' })
-    } finally {
-      setIsSubmitting(false)
-    }
+  function handleOpenGroupChat(group: StudyGroupItem) {
+    setActiveGroup(group.id)
+    useGroupStore.getState().markGroupChatRead(group.id)
+    navigate('/group/' + group.id)
   }
 
   return (
@@ -361,18 +349,31 @@ export default function CoFocus() {
             <UsersRound size={20} aria-hidden="true" />
           </span>
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">Kolaborasi belajar</p>
-            <h1 className="mt-1 text-[22px] font-extrabold leading-7 tracking-tight text-[#1F2C4F] sm:text-[28px] sm:leading-9">Co-Focus</h1>
-            <p className="mt-1 text-[13px] leading-[19px] text-[#56638A]">Bagikan status fokusmu dan berkolaborasi dalam ruang belajar bersama (maksimal 10 orang).</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">
+              Kolaborasi belajar StuFo
+            </p>
+            <h1 className="mt-1 text-[22px] font-extrabold leading-7 tracking-tight text-[#1F2C4F] sm:text-[28px] sm:leading-9">
+              Co-Focus &amp; Grup Belajar
+            </h1>
+            <p className="mt-1 text-[13px] leading-[19px] text-[#56638A]">
+              Pilih grup ruang belajarmu di bawah untuk membuka obrolan diskusi dan melihat daftar
+              anggota yang sedang fokus.
+            </p>
           </div>
         </div>
 
         <div className="mt-6 space-y-5 border-t border-[#DFE4F1] pt-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <label htmlFor="share-focus-status" className="text-sm font-bold text-[#1F2C4F]">Bagikan status saya</label>
+              <label htmlFor="share-focus-status" className="text-sm font-bold text-[#1F2C4F]">
+                Bagikan status saya
+              </label>
               <p className="mt-1 text-[13px] leading-[18px] text-[#56638A]">
-                Status dibagikan: <strong className="font-semibold text-[#1F2C4F]">{isSharing ? ownStatus : 'Tersembunyi'}</strong>.
+                Status dibagikan:{' '}
+                <strong className="font-semibold text-[#1F2C4F]">
+                  {isSharing ? ownStatus : 'Tersembunyi'}
+                </strong>
+                .
               </p>
             </div>
             <button
@@ -395,7 +396,10 @@ export default function CoFocus() {
           </div>
 
           <div>
-            <label htmlFor="cofocus-auto-reply" className="mb-2 flex items-center gap-2 text-sm font-bold text-[#1F2C4F]">
+            <label
+              htmlFor="cofocus-auto-reply"
+              className="mb-2 flex items-center gap-2 text-sm font-bold text-[#1F2C4F]"
+            >
               <MessageSquareText size={17} aria-hidden="true" /> Pesan Balasan Otomatis
             </label>
             <input
@@ -403,7 +407,7 @@ export default function CoFocus() {
               type="text"
               value={autoReply}
               onChange={(event) => setAutoReply(event.target.value)}
-              className="h-11 w-full rounded-[10px] border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-sm text-[#1F2C4F] outline-none transition placeholder:text-[#56638A] focus:bg-white focus:border-[#1D3668] focus:ring-2 focus:ring-[#1D3668]/20"
+              className="h-11 w-full rounded-[10px] border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-sm text-[#1F2C4F] outline-none transition placeholder:text-[#56638A] focus:border-[#1D3668] focus:bg-white focus:ring-2 focus:ring-[#1D3668]/20"
             />
           </div>
         </div>
@@ -411,7 +415,6 @@ export default function CoFocus() {
 
       {/* Action Buttons: Buat Ruang Belajar & Gabung pakai Kode */}
       <section className="grid gap-3.5 sm:grid-cols-2">
-        {/* Tombol Buat Ruang Belajar */}
         <button
           type="button"
           onClick={() => {
@@ -426,15 +429,21 @@ export default function CoFocus() {
               <PlusCircle size={24} />
             </span>
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#9CC3FF]">Mulai Kelompok Baru</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#9CC3FF]">
+                Mulai Kelompok Baru
+              </span>
               <h2 className="text-lg font-extrabold leading-6">Buat Ruang Belajar</h2>
-              <p className="mt-0.5 text-xs text-white/80">Dapatkan kode unik 6 karakter (Maks 10 orang)</p>
+              <p className="mt-0.5 text-xs text-white/80">
+                Dapatkan kode unik 6 karakter (Maks 10 orang)
+              </p>
             </div>
           </div>
-          <ArrowRight size={20} className="shrink-0 text-white/80 transition-transform group-hover:translate-x-1" />
+          <ArrowRight
+            size={20}
+            className="shrink-0 text-white/80 transition-transform group-hover:translate-x-1"
+          />
         </button>
 
-        {/* Tombol Gabung pakai Kode */}
         <button
           type="button"
           onClick={() => {
@@ -448,132 +457,218 @@ export default function CoFocus() {
               <KeyRound size={24} />
             </span>
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#BE2257]">Punya Kode Unik?</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#BE2257]">
+                Punya Kode Unik?
+              </span>
               <h2 className="text-lg font-extrabold leading-6 text-[#1F2C4F]">Gabung pakai Kode</h2>
-              <p className="mt-0.5 text-xs text-[#56638A]">Masukkan 6 karakter kode ruang belajar teman</p>
+              <p className="mt-0.5 text-xs text-[#56638A]">
+                Masukkan 6 karakter kode ruang belajar teman
+              </p>
             </div>
           </div>
-          <ArrowRight size={20} className="shrink-0 text-[#BE2257] transition-transform group-hover:translate-x-1" />
+          <ArrowRight
+            size={20}
+            className="shrink-0 text-[#BE2257] transition-transform group-hover:translate-x-1"
+          />
         </button>
       </section>
 
-      {/* Switcher Ruangan (Jika pengguna tergabung di lebih dari 1 ruangan) */}
-      {groups.length > 1 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <span className="shrink-0 text-xs font-bold text-[#56638A]">Daftar Ruangan Anda:</span>
-          {groups.map((group) => {
-            const isActive = group.id === activeGroupId
-            return (
-              <button
-                key={group.id}
-                type="button"
-                onClick={() => setActiveGroup(group.id)}
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold transition ${
-                  isActive
-                    ? 'bg-[#1D3668] text-white shadow-sm'
-                    : 'border border-[#DFE4F1] bg-white text-[#56638A] hover:bg-[#F6F7FC] hover:text-[#1D3668]'
-                }`}
-              >
-                {group.name} ({group.members.length}/{group.maxMembers && group.maxMembers >= 10 ? group.maxMembers : 10})
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Ruang Belajar Bersama Card (Active Group) */}
+      {/* Daftar Grup Ruang Belajar Bergaya WhatsApp (dengan Badge Pesan Masuk & Hapus Ruang Kecil di Pojok Kanan Atas) */}
       {isLoadingGroups && groups.length === 0 ? (
         <section className="flex flex-col items-center justify-center rounded-2xl border border-[#DFE4F1] bg-white p-12 text-center shadow-[0_2px_4px_rgba(29,54,104,0.03)]">
           <Loader2 size={32} className="animate-spin text-[#BE2257]" aria-hidden="true" />
-          <p className="mt-3 text-sm font-bold text-[#1F2C4F]">Memuat ruang belajar dari Cloud...</p>
+          <p className="mt-3 text-sm font-bold text-[#1F2C4F]">
+            Memuat daftar ruang belajar dari Cloud...
+          </p>
         </section>
-      ) : activeGroup ? (
-        <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 sm:p-6 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3.5">
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
-                <MessageSquareText size={22} aria-hidden="true" />
+      ) : groups.length > 0 ? (
+        <section className="space-y-3" aria-label="Daftar Grup Ruang Belajar">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-[18px] font-extrabold text-[#1F2C4F]">
+                Daftar Grup Ruang Belajar
+              </h2>
+              <span className="rounded-full bg-[#E1EAF8] px-2.5 py-0.5 text-xs font-bold text-[#1D3668]">
+                {groups.length} grup
               </span>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#BE2257]">Ruang Belajar Aktif</p>
-                  <span className="rounded-full bg-[#D6F0DE] px-2 py-0.5 text-[10px] font-bold text-[#17623A]">
-                    {currentMembers.length >= maxMembers ? `Penuh (Maks ${maxMembers})` : `${currentMembers.length} / ${maxMembers} Anggota`}
-                  </span>
-                  {isHost && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
-                      <ShieldCheck size={12} className="text-[#1D3668]" />
-                      Anda Admin Host
-                    </span>
-                  )}
-                  {roomJoinCode && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#DFE4F1] bg-[#F6F7FC] px-2.5 py-0.5 font-mono text-[11px] font-extrabold text-[#1D3668]">
-                      <span>Kode: {roomJoinCode}</span>
+            </div>
+            <span className="text-xs text-[#56638A]">
+              Ketuk grup untuk masuk ke ruang obrolan
+            </span>
+          </div>
+
+          <div className="divide-y divide-[#DFE4F1] overflow-hidden rounded-2xl border border-[#DFE4F1] bg-white shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
+            {groups.map((group) => {
+              const groupMembers = group.members || []
+              const maxMembers =
+                group.maxMembers && group.maxMembers >= 10 ? group.maxMembers : 10
+              const focusingCount = groupMembers.filter((m) => m.status === 'fokus').length
+              const unreadCount = group.unreadCount || 0
+              const isHost = Boolean(
+                (user?.id && group.hostId === user.id) ||
+                  groupMembers.some((m) => m.userId === user?.id && m.isHost)
+              )
+              const groupInitials =
+                group.name
+                  .split(' ')
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((w) => w[0]?.toUpperCase())
+                  .join('') || 'GR'
+
+              return (
+                <article
+                  key={group.id}
+                  onClick={() => handleOpenGroupChat(group)}
+                  className="group relative flex cursor-pointer flex-col gap-3 p-4 transition hover:bg-[#F6F7FC] sm:p-5"
+                >
+                  {/* Tombol Hapus Ruang / Keluar yang Diperkecil di Pojok Kanan Atas agar tidak salah pencet */}
+                  <div
+                    className="absolute right-3.5 top-3.5 z-10 flex items-center gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {group.lastMessage?.timeLabel && (
+                      <span
+                        className={`mr-1 text-[11px] font-bold ${
+                          unreadCount > 0 ? 'text-[#17623A]' : 'text-[#757780]'
+                        }`}
+                      >
+                        {group.lastMessage.timeLabel}
+                      </span>
+                    )}
+                    {isHost ? (
                       <button
                         type="button"
-                        onClick={() => handleCopy(roomJoinCode)}
-                        title="Salin Kode Ruangan"
-                        className="text-[#56638A] hover:text-[#1D3668]"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setGroupToDelete(group)
+                        }}
+                        title="Hapus Ruang Belajar (Admin Host)"
+                        className="inline-flex h-7 items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2 py-0.5 text-[10px] font-bold text-red-700 transition hover:bg-red-100 hover:border-red-300"
                       >
-                        {copiedCode ? <Check size={12} className="text-[#17623A]" /> : <Copy size={12} />}
+                        <Trash2 size={11} className="text-red-600" />
+                        <span>Hapus Ruang</span>
                       </button>
-                    </span>
-                  )}
-                </div>
-                <h2 className="mt-1 text-[18px] font-bold leading-6 text-[#1F2C4F]">
-                  Forum Grup Belajar: {activeGroup.name}
-                </h2>
-                <p className="mt-1 max-w-2xl text-[13px] leading-[19px] text-[#56638A]">
-                  {activeGroup.description || 'Ruang kolaborasi terpadu untuk berdiskusi materi kuliah dan berbagi tugas.'}
-                  {remainingSlots > 0
-                    ? ` Masih tersedia ${remainingSlots} slot anggota lagi.`
-                    : ` Ruangan telah mencapai batas kapasitas maksimum (${maxMembers} orang).`}
-                </p>
-              </div>
-            </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setGroupToLeave(group)
+                        }}
+                        title="Keluar dari Ruang Belajar"
+                        className="inline-flex h-7 items-center gap-1 rounded-lg border border-[#DFE4F1] bg-white px-2 py-0.5 text-[10px] font-bold text-[#56638A] transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <LogOut size={11} />
+                        <span>Keluar</span>
+                      </button>
+                    )}
+                  </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-              {roomJoinCode && (
-                <button
-                  type="button"
-                  onClick={() => handleCopy(roomJoinCode)}
-                  className="flex h-11 items-center justify-center gap-2 rounded-[10px] border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-xs font-bold text-[#1D3668] transition hover:bg-[#E1EAF8]"
-                >
-                  {copiedCode ? <Check size={15} className="text-[#17623A]" /> : <Copy size={15} />}
-                  <span>{copiedCode ? 'Kode Disalin!' : 'Salin Kode'}</span>
-                </button>
-              )}
-              {isHost ? (
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteModal(true)}
-                  className="flex h-11 items-center justify-center gap-2 rounded-[10px] border border-red-200 bg-red-50/70 px-4 text-xs font-bold text-red-700 transition hover:bg-red-100 hover:border-red-300"
-                  title="Hapus Ruangan (Admin)"
-                >
-                  <Trash2 size={15} className="text-red-600" />
-                  <span>Hapus Ruang</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowLeaveModal(true)}
-                  className="flex h-11 items-center justify-center gap-2 rounded-[10px] border border-[#DFE4F1] bg-white px-4 text-xs font-bold text-[#56638A] transition hover:bg-[#F6F7FC] hover:text-[#BE2257]"
-                  title="Keluar dari Ruangan"
-                >
-                  <LogOut size={15} />
-                  <span>Keluar</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => navigate('/group/' + activeGroup.id)}
-                className="flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#1D3668] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#162B54] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#BE2257] focus:ring-offset-2"
-              >
-                <MessageSquareText size={17} aria-hidden="true" />
-                <span>Masuk ke Ruang Belajar</span>
-                <ArrowRight size={16} aria-hidden="true" />
-              </button>
-            </div>
+                  {/* Baris Utama Gaya WhatsApp */}
+                  <div className="flex items-start gap-3.5 pr-28 sm:pr-36">
+                    {/* Avatar Grup */}
+                    <div className="relative shrink-0">
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#1D3668] text-sm font-extrabold text-white shadow-xs">
+                        {groupInitials}
+                      </span>
+                      {focusingCount > 0 && (
+                        <span
+                          title={`${focusingCount} anggota sedang fokus`}
+                          className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-[#17623A]"
+                        />
+                      )}
+                    </div>
+
+                    {/* Nama Grup, Info Kode & Preview Pesan Terakhir */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <h3 className="truncate text-[16px] font-extrabold text-[#1F2C4F]">
+                          {group.name}
+                        </h3>
+                        {group.isMuted && (
+                          <span
+                            title="Notifikasi grup dibisukan"
+                            className="inline-flex items-center text-[#757780]"
+                          >
+                            <BellOff size={13} />
+                          </span>
+                        )}
+                        {isHost && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
+                            <ShieldCheck size={11} />
+                            Host
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-[#56638A]">
+                        <span>
+                          {groupMembers.length}/{maxMembers} anggota
+                        </span>
+                        <span>·</span>
+                        <span className="font-mono font-bold text-[#1D3668]">
+                          Kode: {group.joinCode}
+                        </span>
+                        {focusingCount > 0 && (
+                          <>
+                            <span>·</span>
+                            <span className="text-[#17623A] font-bold">
+                              🟢 {focusingCount} sedang fokus
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Preview Pesan Terakhir (Gaya WhatsApp) */}
+                      <p
+                        className={`mt-1.5 line-clamp-1 text-xs ${
+                          unreadCount > 0
+                            ? 'font-bold text-[#1F2C4F]'
+                            : 'font-medium text-[#56638A]'
+                        }`}
+                      >
+                        {group.lastMessage ? (
+                          <>
+                            <span className="font-bold text-[#1D3668]">
+                              {group.lastMessage.senderName}:{' '}
+                            </span>
+                            <span>{group.lastMessage.text}</span>
+                          </>
+                        ) : (
+                          group.description ||
+                          'Belum ada obrolan. Ketuk untuk membuka ruang diskusi belajar.'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Baris Bawah: Tombol Masuk ke Ruang Belajar + Badge Pesan Belum Dibaca Ala WhatsApp */}
+                  <div className="flex items-center justify-between border-t border-[#DFE4F1]/70 pt-2.5">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#1D3668] group-hover:text-[#BE2257]">
+                      <MessageSquareText size={15} />
+                      <span>Masuk ke Ruang Belajar &amp; Cek Anggota</span>
+                      <ArrowRight
+                        size={14}
+                        className="transition-transform group-hover:translate-x-1"
+                      />
+                    </span>
+
+                    {unreadCount > 0 && (
+                      <span
+                        aria-label={`${unreadCount} pesan baru belum dibaca`}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[#17623A] px-2.5 py-0.5 text-[11px] font-extrabold text-white shadow-xs"
+                      >
+                        <span className="grid h-4 min-w-[16px] place-items-center rounded-full bg-white px-1 text-[10px] font-extrabold text-[#17623A]">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                        <span>pesan baru</span>
+                      </span>
+                    )}
+                  </div>
+                </article>
+              )
+            })}
           </div>
         </section>
       ) : (
@@ -585,7 +680,8 @@ export default function CoFocus() {
             Kamu belum bergabung di ruang belajar mana pun
           </h2>
           <p className="mt-1.5 max-w-sm text-[13px] leading-[19px] text-[#56638A]">
-            Buat ruang baru lalu bagikan kodenya, atau masukkan kode 6 karakter dari temanmu untuk fokus bersama.
+            Buat ruang baru lalu bagikan kodenya, atau masukkan kode 6 karakter dari temanmu untuk
+            fokus bersama.
           </p>
           <div className="mt-6 flex w-full flex-col justify-center gap-2.5 sm:w-auto sm:flex-row">
             <button
@@ -615,104 +711,6 @@ export default function CoFocus() {
         </section>
       )}
 
-      {/* Anggota Kelompok Section (Max 10) — hanya tampil jika ada ruang aktif */}
-      {activeGroup && (
-      <section aria-labelledby="cofocus-members-title">
-        <div className="mb-3 flex items-center justify-between px-0.5">
-          <div className="flex items-center gap-2">
-            <h2 id="cofocus-members-title" className="text-[18px] font-bold leading-6 text-[#1F2C4F]">
-              Anggota Ruang Belajar
-            </h2>
-            <span className="rounded-full bg-[#E1EAF8] px-2.5 py-1 text-[11px] font-semibold text-[#1D3668]">
-              {currentMembers.length} / {maxMembers} Anggota
-            </span>
-          </div>
-          <span className="text-[11px] font-semibold text-[#56638A]">
-            {activeGroup?.name || 'Kelompok Belajar'}
-          </span>
-        </div>
-
-        {/* Grid slots showing member status and room limit */}
-        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
-          {currentMembers.map((member, index) => {
-            const isCurrentUser = member.userId === user?.id
-            // Membaca status murni dari database (Source of Truth), tanpa ditimpa state lokal
-            const isFocusing = member.status === 'fokus'
-            const statusLabel: 'Sedang Fokus' | 'Istirahat' =
-              isFocusing ? 'Sedang Fokus' : 'Istirahat'
-            const badgeStyle = statusStyles[statusLabel]
-            const canKick = isHost && !member.isHost && !isCurrentUser
-            const displayedCourse =
-              (isCurrentUser && user?.major) || member.course || 'Mahasiswa'
-
-            return (
-              <article
-                key={member.id || `member-${index}`}
-                className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] transition hover:border-[#B7C7E8]"
-              >
-                <div className="flex items-start justify-between">
-                  <span
-                    className={`grid h-11 w-11 place-items-center rounded-full text-xs font-extrabold text-white ${
-                      index % 2 ? 'bg-[#BE2257]' : 'bg-[#1D3668]'
-                    }`}
-                  >
-                    {member.avatar || 'M'}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {member.isHost && (
-                      <span className="rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
-                        Host Admin
-                      </span>
-                    )}
-                    {canKick && (
-                      <button
-                        type="button"
-                        onClick={() => setMemberToKick(member)}
-                        className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50/70 px-2 py-0.5 text-[10px] font-bold text-red-600 hover:bg-red-100 transition"
-                        title="Keluarkan dari grup"
-                      >
-                        <UserMinus size={11} />
-                        <span>Kick</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <h3 className="mt-4 text-[16px] font-bold leading-[22px] text-[#1F2C4F]">{member.name}</h3>
-                <p className="mt-1 text-xs text-[#56638A]">{displayedCourse}</p>
-                <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeStyle}`}>
-                  {statusLabel}
-                </span>
-              </article>
-            )
-          })}
-
-          {/* Placeholder cards for empty slots up to maxMembers */}
-          {Array.from({ length: remainingSlots }).map((_, slotIndex) => (
-            <div
-              key={`empty-slot-${slotIndex}`}
-              className="flex min-h-[140px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#DFE4F1] bg-[#F6F7FC]/60 p-5 text-center"
-            >
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-[#E1EAF8] text-[#56638A]">
-                <PlusCircle size={18} />
-              </div>
-              <p className="mt-2 text-xs font-bold text-[#56638A]">
-                Slot {currentMembers.length + slotIndex + 1} Tersedia
-              </p>
-              {roomJoinCode ? (
-                <p className="mt-0.5 text-[11px] text-[#757780]">
-                  Ajak teman pakai kode: <strong className="font-mono text-[#1D3668]">{roomJoinCode}</strong>
-                </p>
-              ) : (
-                <p className="mt-0.5 text-[11px] text-[#757780]">
-                  Siap digunakan untuk anggota baru
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-      )}
-
       {/* Modal 1: Buat Ruang Belajar */}
       {showCreateModal && (
         <div
@@ -740,7 +738,6 @@ export default function CoFocus() {
             </div>
 
             {createdRoomCode ? (
-              // Success Screen after creation
               <div className="mt-5 space-y-4 text-center">
                 <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#D6F0DE] text-[#17623A]">
                   <CheckCircle2 size={32} />
@@ -771,7 +768,7 @@ export default function CoFocus() {
                   </button>
                 </div>
 
-                <div className="pt-2 flex gap-2">
+                <div className="flex gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(false)}
@@ -792,10 +789,12 @@ export default function CoFocus() {
                 </div>
               </div>
             ) : (
-              // Form Input Screen
               <form onSubmit={handleCreateRoom} className="mt-5 space-y-4">
                 <div>
-                  <label htmlFor="create-room-name" className="mb-1.5 block text-xs font-bold text-[#1F2C4F]">
+                  <label
+                    htmlFor="create-room-name"
+                    className="mb-1.5 block text-xs font-bold text-[#1F2C4F]"
+                  >
                     Nama Ruang Belajar
                   </label>
                   <input
@@ -808,11 +807,12 @@ export default function CoFocus() {
                     className="h-11 w-full rounded-[10px] border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-sm text-[#1F2C4F] outline-none transition placeholder:text-[#757780] focus:border-[#1D3668] focus:bg-white focus:ring-2 focus:ring-[#1D3668]/20"
                   />
                   <p className="mt-1.5 text-[11px] text-[#56638A]">
-                    Sistem otomatis menghasilkan 6 digit kode unik & membatasi kapasitas maksimal 10 orang.
+                    Sistem otomatis menghasilkan 6 digit kode unik &amp; membatasi kapasitas maksimal
+                    10 orang.
                   </p>
                 </div>
 
-                <div className="pt-2 flex justify-end gap-2">
+                <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(false)}
@@ -863,7 +863,10 @@ export default function CoFocus() {
 
             <form onSubmit={handleJoinRoom} className="mt-5 space-y-4">
               <div>
-                <label htmlFor="join-room-code" className="mb-1.5 block text-center text-xs font-bold text-[#1F2C4F]">
+                <label
+                  htmlFor="join-room-code"
+                  className="mb-1.5 block text-center text-xs font-bold text-[#1F2C4F]"
+                >
                   Masukkan 6 Karakter Kode Ruangan
                 </label>
                 <input
@@ -873,35 +876,23 @@ export default function CoFocus() {
                   required
                   autoFocus
                   value={joinCodeInput}
-                  onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+                  onChange={(e) =>
+                    setJoinCodeInput(
+                      e.target.value
+                        .toUpperCase()
+                        .replace(/[^A-Z0-9]/g, '')
+                        .slice(0, 6)
+                    )
+                  }
                   placeholder="KODE6X"
-                  className="h-14 w-full text-center font-mono text-3xl font-extrabold uppercase tracking-[0.25em] rounded-xl border-2 border-[#DFE4F1] bg-[#F6F7FC] text-[#1D3668] outline-none transition placeholder:text-[#C4C6D0] focus:border-[#BE2257] focus:bg-white focus:ring-4 focus:ring-[#BE2257]/15"
+                  className="h-14 w-full rounded-xl border-2 border-[#DFE4F1] bg-[#F6F7FC] text-center font-mono text-3xl font-extrabold uppercase tracking-[0.25em] text-[#1D3668] outline-none transition placeholder:text-[#C4C6D0] focus:border-[#BE2257] focus:bg-white focus:ring-4 focus:ring-[#BE2257]/15"
                 />
                 <p className="mt-2 text-center text-[11px] text-[#56638A]">
                   Format: 6 huruf kapital/angka acak. Setiap ruang berkapasitas maksimal 10 orang.
                 </p>
-                <div className="mt-2 flex justify-center gap-1.5 text-[10px] text-[#757780]">
-                  <span>Contoh kode aktif:</span>
-                  <button
-                    type="button"
-                    onClick={() => setJoinCodeInput('INOV26')}
-                    className="font-mono font-bold text-[#1D3668] underline hover:text-[#BE2257]"
-                  >
-                    INOV26
-                  </button>
-                  <span>·</span>
-                  <button
-                    type="button"
-                    onClick={() => setJoinCodeInput('PENU10')}
-                    title="Uji coba validasi ruangan penuh"
-                    className="font-mono font-bold text-red-600 underline hover:text-red-700"
-                  >
-                    PENU10 (Penuh)
-                  </button>
-                </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowJoinModal(false)}
@@ -912,7 +903,7 @@ export default function CoFocus() {
                 <button
                   type="submit"
                   disabled={isSubmitting || joinCodeInput.trim().length !== 6}
-                  className="flex items-center gap-1.5 rounded-[10px] bg-[#BE2257] px-5 py-2.5 text-xs font-bold text-white transition hover:bg-[#A11B48] disabled:opacity-50 shadow-sm"
+                  className="flex items-center gap-1.5 rounded-[10px] bg-[#BE2257] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#A11B48] disabled:opacity-50"
                 >
                   <KeyRound size={15} />
                   <span>{isSubmitting ? 'Memeriksa...' : 'Gabung Sekarang'}</span>
@@ -923,50 +914,11 @@ export default function CoFocus() {
         </div>
       )}
 
-      {/* Modal 3: Kick Member */}
-      {memberToKick && (
+      {/* Modal 3: Hapus Ruangan (Admin) */}
+      {groupToDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-sm"
-          onClick={() => !isSubmitting && setMemberToKick(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl border border-red-100 bg-white p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-600">
-              <UserMinus size={24} />
-            </div>
-            <h4 className="mt-4 text-center text-base font-bold text-[#1F2C4F]">Keluarkan Anggota?</h4>
-            <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
-              Apakah Anda yakin ingin mengeluarkan <strong className="text-[#1F2C4F]">{memberToKick.name}</strong> dari ruang belajar ini?
-            </p>
-            <div className="mt-6 flex gap-2">
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={() => setMemberToKick(null)}
-                className="flex-1 rounded-[10px] border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={handleConfirmKick}
-                className="flex-1 rounded-[10px] bg-red-600 py-2.5 text-xs font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
-              >
-                {isSubmitting ? 'Mengeluarkan...' : 'Ya, Keluarkan'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 4: Hapus Ruangan (Admin) */}
-      {showDeleteModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-sm"
-          onClick={() => !isSubmitting && setShowDeleteModal(false)}
+          onClick={() => !isSubmitting && setGroupToDelete(null)}
         >
           <div
             className="w-full max-w-sm rounded-2xl border border-red-100 bg-white p-6 shadow-2xl"
@@ -975,15 +927,19 @@ export default function CoFocus() {
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-600">
               <AlertTriangle size={24} />
             </div>
-            <h4 className="mt-4 text-center text-base font-bold text-[#1F2C4F]">Hapus Ruang Belajar?</h4>
+            <h4 className="mt-4 text-center text-base font-bold text-[#1F2C4F]">
+              Hapus Ruang Belajar?
+            </h4>
             <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
-              Sebagai host, tindakan ini akan menghapus ruangan <strong className="text-[#1F2C4F]">"{activeGroup?.name}"</strong> beserta seluruh pesan obrolan secara permanen untuk semua anggota.
+              Sebagai host, tindakan ini akan menghapus ruangan{' '}
+              <strong className="text-[#1F2C4F]">"{groupToDelete.name}"</strong> beserta seluruh
+              pesan obrolan secara permanen untuk semua anggota.
             </p>
             <div className="mt-6 flex gap-2">
               <button
                 type="button"
                 disabled={isSubmitting}
-                onClick={() => setShowDeleteModal(false)}
+                onClick={() => setGroupToDelete(null)}
                 className="flex-1 rounded-[10px] border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
               >
                 Batal
@@ -1001,11 +957,11 @@ export default function CoFocus() {
         </div>
       )}
 
-      {/* Modal 5: Keluar Ruangan (Member) */}
-      {showLeaveModal && (
+      {/* Modal 4: Keluar Ruangan (Member) */}
+      {groupToLeave && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1A3D]/45 p-4 backdrop-blur-sm"
-          onClick={() => !isSubmitting && setShowLeaveModal(false)}
+          onClick={() => !isSubmitting && setGroupToLeave(null)}
         >
           <div
             className="w-full max-w-sm rounded-2xl border border-[#DFE4F1] bg-white p-6 shadow-2xl"
@@ -1014,15 +970,19 @@ export default function CoFocus() {
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-100 text-amber-600">
               <LogOut size={24} />
             </div>
-            <h4 className="mt-4 text-center text-base font-bold text-[#1F2C4F]">Keluar dari Ruang Belajar?</h4>
+            <h4 className="mt-4 text-center text-base font-bold text-[#1F2C4F]">
+              Keluar dari Ruang Belajar?
+            </h4>
             <p className="mt-2 text-center text-xs leading-relaxed text-[#56638A]">
-              Apakah Anda yakin ingin keluar dari ruangan <strong className="text-[#1F2C4F]">"{activeGroup?.name}"</strong>? Anda dapat bergabung kembali sewaktu-waktu dengan kode ruangan jika masih ada slot.
+              Apakah Anda yakin ingin keluar dari ruangan{' '}
+              <strong className="text-[#1F2C4F]">"{groupToLeave.name}"</strong>? Anda dapat
+              bergabung kembali sewaktu-waktu dengan kode ruangan jika masih ada slot.
             </p>
             <div className="mt-6 flex gap-2">
               <button
                 type="button"
                 disabled={isSubmitting}
-                onClick={() => setShowLeaveModal(false)}
+                onClick={() => setGroupToLeave(null)}
                 className="flex-1 rounded-[10px] border border-[#DFE4F1] py-2.5 text-xs font-bold text-[#56638A] hover:bg-[#F6F7FC] disabled:opacity-50"
               >
                 Batal

@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getStudyDate } from '../data/mockData'
+import { startTimerAlarm } from '../lib/stufoSync'
 import { useAuthStore } from '../store/authStore'
 import { useSessionStore } from '../store/sessionStore'
 import { useStudyStore } from '../store/studyStore'
@@ -36,46 +37,15 @@ function formatClock(seconds: number) {
 }
 
 function triggerTimerFinishedAlert(sessionTitle: string) {
-  // 1. Bunyi alarm lembut menggunakan Web Audio API
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (AudioCtx) {
-      const ctx = new AudioCtx()
-      const notes = [523.25, 659.25, 783.99, 1046.5] // C5, E5, G5, C6
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'sine'
-        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.18)
-        gain.gain.setValueAtTime(0.22, ctx.currentTime + idx * 0.18)
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.18 + 0.45)
-        osc.connect(gain)
-        gain.connect(ctx.destination)
-        osc.start(ctx.currentTime + idx * 0.18)
-        osc.stop(ctx.currentTime + idx * 0.18 + 0.45)
-      })
-    }
-  } catch {
-    // ignore audio errors
-  }
+  // 1. Bunyi alarm panjang berulang (12 detik seperti jam beker) + getar
+  startTimerAlarm(12000)
 
-  // 2. Getar perangkat jika didukung
-  try {
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([300, 150, 300])
-    }
-  } catch {
-    // ignore
-  }
-
-  // 3. Browser / Web Notification
+  // 2. Browser / Web Notification
   try {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'granted') {
         new Notification('⏰ Waktu Fokus Selesai! — StuFo', {
-          body: `Sesi "${sessionTitle}" telah selesai. Kerja bagus! Saatnya mencatat refleksi singkatmu.`,
+          body: `Sesi "${sessionTitle}" telah selesai. Durasi fokusmu sudah otomatis tercatat!`,
           icon: '/logo.jpg',
         })
       }
@@ -84,7 +54,7 @@ function triggerTimerFinishedAlert(sessionTitle: string) {
     // ignore
   }
 
-  // 4. Sinyal ke React Native WebView (jika berjalan di aplikasi Android)
+  // 3. Sinyal ke React Native WebView (jika berjalan di aplikasi Android)
   try {
     const rnWebView = (
       window as unknown as {
@@ -97,7 +67,7 @@ function triggerTimerFinishedAlert(sessionTitle: string) {
           type: 'TIMER_COMPLETED_NOTIFICATION',
           data: {
             title: 'Waktu Fokus Selesai! 🎉',
-            body: `Sesi "${sessionTitle}" telah selesai.`,
+            body: `Sesi "${sessionTitle}" telah selesai dan durasi otomatis tercatat.`,
           },
         })
       )

@@ -22,6 +22,7 @@ import {
   mockSessions,
   mockUsers,
 } from '../lib/mockData'
+import { parseMemberCourseMeta } from '../lib/stufoSync'
 import { supabase } from '../lib/supabase'
 import { evaluateStreak, formatLastStudyDateLabel } from '../lib/streak'
 import { useAuthStore } from '../store/authStore'
@@ -76,26 +77,31 @@ function formatTime(time: string) {
 }
 
 function formatFocusDurationLabel(startedAtIso?: string | null, totalSecondsFallback?: number, nowMs: number = Date.now()): string {
-  let elapsedMinutes = 0
+  let elapsedSeconds = 0
   if (startedAtIso) {
     const startMs = new Date(startedAtIso).getTime()
     if (!Number.isNaN(startMs) && nowMs > startMs) {
-      const diffMinutes = Math.floor((nowMs - startMs) / 60000)
-      // Batasi jika timestamp lama (mis. joined_at berhari-hari lalu) agar tetap masuk akal
-      if (diffMinutes > 0 && diffMinutes <= 360) {
-        elapsedMinutes = diffMinutes
+      const diffSeconds = Math.floor((nowMs - startMs) / 1000)
+      // Batasi jika timestamp lama (mis. joined_at berhari-hari lalu) agar tetap masuk akal (<= 6 jam)
+      if (diffSeconds > 0 && diffSeconds <= 6 * 3600) {
+        elapsedSeconds = diffSeconds
       }
     }
   }
 
-  if (elapsedMinutes === 0 && totalSecondsFallback && totalSecondsFallback > 0) {
-    elapsedMinutes = Math.max(1, Math.round(totalSecondsFallback / 60))
+  if (elapsedSeconds === 0 && totalSecondsFallback && totalSecondsFallback > 0) {
+    elapsedSeconds = totalSecondsFallback
   }
 
-  if (elapsedMinutes <= 0) {
+  if (elapsedSeconds <= 0) {
     return 'Baru mulai fokus (< 1 menit)'
   }
 
+  if (elapsedSeconds < 60) {
+    return `Sedang fokus (${elapsedSeconds} detik)`
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
   const hours = Math.floor(elapsedMinutes / 60)
   const mins = elapsedMinutes % 60
   if (hours > 0) {
@@ -242,11 +248,11 @@ export default function Dashboard() {
   const [rekanSedangFokus, setRekanSedangFokus] = useState(0)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
-  // Perbarui ticker waktu setiap 30 detik agar durasi fokus teman selalu ter-update
+  // Perbarui ticker waktu setiap 5 detik agar durasi fokus teman selalu ter-update secara live
   useEffect(() => {
     const interval = window.setInterval(() => {
       setNowMs(Date.now())
-    }, 30000)
+    }, 5000)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -290,7 +296,7 @@ export default function Dashboard() {
 
         const uniquePeersMap = new Map<
           string,
-          { status: string; course: string; startedAt?: string | null }
+          { status: string; course: string; startedAt?: string | null; metaSeconds?: number }
         >()
         for (const row of (peerRows as Array<{
           user_id: string
@@ -300,11 +306,13 @@ export default function Dashboard() {
           joined_at?: string | null
         }>) || []) {
           const prev = uniquePeersMap.get(row.user_id)
+          const parsedMeta = parseMemberCourseMeta(row.course)
           if (!prev || row.status === 'fokus') {
             uniquePeersMap.set(row.user_id, {
               status: row.status,
-              course: row.course || 'Mahasiswa',
-              startedAt: row.focus_started_at || row.joined_at || null,
+              course: parsedMeta.cleanCourse || 'Mahasiswa',
+              startedAt: parsedMeta.startedAtIso || row.focus_started_at || null,
+              metaSeconds: parsedMeta.totalFocusSeconds,
             })
           }
         }
@@ -331,7 +339,7 @@ export default function Dashboard() {
             .from('focus_sessions')
             .select('user_id, actual_duration, started_at, created_at')
             .in('user_id', focusedUserIds)
-            .order('started_at', { ascending: false })
+            .order('created_at', { ascending: false })
             .limit(50),
         ])
 
@@ -346,8 +354,8 @@ export default function Dashboard() {
         for (const s of (sessionsData as Array<{
           user_id: string
           actual_duration: number | null
-          started_at: string | null
-          created_at: string | null
+          started_at?: string | null
+          created_at?: string | null
         }>) || []) {
           if (!latestStartByUser.has(s.user_id) && (s.started_at || s.created_at)) {
             latestStartByUser.set(s.user_id, (s.started_at || s.created_at) as string)
@@ -364,9 +372,10 @@ export default function Dashboard() {
           return {
             id: peerId,
             name: prof?.name || 'Rekan Kelompok',
-            course: memberInfo?.course || prof?.major || 'Mahasiswa',
+            course: parseMemberCourseMeta(memberInfo?.course || prof?.major || 'Mahasiswa').cleanCourse,
             startedAt: memberInfo?.startedAt || latestStartByUser.get(peerId) || null,
-            totalFocusSecondsToday: totalSecondsByUser.get(peerId) || 900,
+            totalFocusSecondsToday:
+              totalSecondsByUser.get(peerId) || memberInfo?.metaSeconds || 60,
           }
         })
 
@@ -382,6 +391,11 @@ export default function Dashboard() {
     void fetchStudyBlocks(uid)
     void fetchMyGroups(uid)
     void syncDashboardRealtimeStats()
+
+    // Heartbeat polling setiap 5 detik agar daftar teman yang sedang fokus dijamin 100% realtime
+    const pollInterval = window.setInterval(() => {
+      void syncDashboardRealtimeStats()
+    }, 5000)
 
     const dashboardChannel = supabase
       .channel(`dashboard-live-stats:${uid}`)
@@ -399,6 +413,7 @@ export default function Dashboard() {
               focus_started_at?: string | null
             }
             const peerUserId = updatedRow.user_id
+            const parsedMeta = parseMemberCourseMeta(updatedRow.course)
             if (peerUserId && peerUserId !== uid) {
               setLiveFocusedPeers((prev) => {
                 let next = [...prev]
@@ -408,14 +423,18 @@ export default function Dashboard() {
                     next.push({
                       id: peerUserId,
                       name: 'Rekan Kelompok',
-                      course: updatedRow.course || 'Mahasiswa',
-                      startedAt: updatedRow.focus_started_at || new Date().toISOString(),
+                      course: parsedMeta.cleanCourse || 'Mahasiswa',
+                      startedAt:
+                        parsedMeta.startedAtIso ||
+                        updatedRow.focus_started_at ||
+                        new Date().toISOString(),
                     })
                   } else {
                     next[existingIdx] = {
                       ...next[existingIdx],
-                      course: updatedRow.course || next[existingIdx].course,
+                      course: parsedMeta.cleanCourse || next[existingIdx].course,
                       startedAt:
+                        parsedMeta.startedAtIso ||
                         updatedRow.focus_started_at ||
                         next[existingIdx].startedAt ||
                         new Date().toISOString(),
@@ -442,9 +461,19 @@ export default function Dashboard() {
       )
       .subscribe()
 
+    const broadcastSyncChannel = supabase
+      .channel('stufo-realtime-sync')
+      .on('broadcast', { event: 'focus_or_leaderboard_updated' }, () => {
+        void syncDashboardRealtimeStats()
+        void fetchMyGroups(uid)
+      })
+      .subscribe()
+
     return () => {
       isMounted = false
+      window.clearInterval(pollInterval)
       void supabase.removeChannel(dashboardChannel)
+      void supabase.removeChannel(broadcastSyncChannel)
     }
   }, [authUser?.id, fetchStudyBlocks, fetchMyGroups])
 

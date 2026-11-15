@@ -114,5 +114,41 @@ as $$
   order by total_focus_seconds desc, total_sessions desc, full_name asc;
 $$;
 
+-- 5. Pastikan kebijakan RLS focus_sessions & profiles mengizinkan pembacaan untuk Leaderboard Teman
+drop policy if exists "Semua pengguna login dapat membaca focus_sessions untuk leaderboard" on public.focus_sessions;
+create policy "Semua pengguna login dapat membaca focus_sessions untuk leaderboard"
+  on public.focus_sessions for select
+  using (auth.role() = 'authenticated');
+
+drop policy if exists "Semua pengguna login dapat melihat profil teman" on public.profiles;
+create policy "Semua pengguna login dapat melihat profil teman"
+  on public.profiles for select
+  using (auth.role() = 'authenticated');
+
+-- 6. Aktifkan publikasi Realtime untuk study_group_members, group_chat_messages, dan focus_sessions
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'group_chat_messages'
+  ) then
+    alter publication supabase_realtime add table public.group_chat_messages;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'study_group_members'
+  ) then
+    alter publication supabase_realtime add table public.study_group_members;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'focus_sessions'
+  ) then
+    alter publication supabase_realtime add table public.focus_sessions;
+  end if;
+end $$;
+
 -- Segarkan Schema Cache PostgREST Supabase
 notify pgrst, 'reload schema';

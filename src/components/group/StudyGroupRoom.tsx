@@ -34,6 +34,7 @@ import {
   type FormEvent,
 } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { parseMemberCourseMeta } from '../../lib/stufoSync'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import {
@@ -48,6 +49,7 @@ export interface Message {
   senderName: string
   senderAvatar?: string
   time: string
+  createdAtMs?: number
   kind: 'text' | 'image' | 'document'
   text?: string
   fileUrl?: string
@@ -133,6 +135,7 @@ function mapSupabaseRowToMessage(
     senderName,
     senderAvatar,
     time,
+    createdAtMs: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     kind: row.kind,
     text: row.is_deleted ? 'Pesan ini telah dihapus' : (row.text || undefined),
     fileUrl: row.file_url || undefined,
@@ -465,13 +468,15 @@ export default function StudyGroupRoom() {
               .join('')
               .toUpperCase() || 'M'
 
+          const parsedMeta = parseMemberCourseMeta(m.course)
           return {
             id: m.id,
             userId: m.user_id,
             name: isCurrentUser ? `${name} (Anda)` : name,
             avatar: initials,
             status: m.status === 'fokus' ? 'fokus' : 'istirahat',
-            course: m.course || prof?.major || 'Mahasiswa',
+            course: parseMemberCourseMeta(prof?.major || parsedMeta.cleanCourse || 'Mahasiswa').cleanCourse,
+            lastReadByGroup: parsedMeta.lastReadByGroup,
             isHost: m.role === 'owner',
           }
         })
@@ -580,7 +585,8 @@ export default function StudyGroupRoom() {
           )
           setMessages(mapped)
 
-          // Tandai pesan di ruangan ini sudah dibaca oleh user saat ini (Read Receipt ala WhatsApp)
+          // Tandai pesan di ruangan ini sudah dibaca oleh user saat ini (Read Receipt ala WhatsApp + reset badge unread)
+          useGroupStore.getState().markGroupChatRead(targetGroupId)
           if (currentUser?.id) {
             void supabase
               .rpc('mark_group_messages_read', { p_group_id: targetGroupId })
@@ -733,6 +739,7 @@ export default function StudyGroupRoom() {
             }
 
             if (currentUser?.id) {
+              useGroupStore.getState().markGroupChatRead(targetGroupId)
               void supabase
                 .rpc('mark_group_messages_read', { p_group_id: targetGroupId })
                 .then(() => undefined, () => undefined)
@@ -777,17 +784,22 @@ export default function StudyGroupRoom() {
         if (!readerId || readerId === currentUser?.id) return
         setMessages((prev) =>
           prev.map((msg) => {
-            if (msg.senderId === 'current-user') {
-              const currentReads = msg.readBy || []
-              if (!currentReads.includes(readerId)) {
-                return { ...msg, readBy: [...currentReads, readerId] }
-              }
+            const currentReads = msg.readBy || []
+            if (!currentReads.includes(readerId)) {
+              return { ...msg, readBy: [...currentReads, readerId] }
             }
             return msg
           })
         )
       })
       .subscribe((status) => {
+        if (status === 'SUBSCRIBED' && currentUser?.id) {
+          void chatChannel.send({
+            type: 'broadcast',
+            event: 'messages_read',
+            payload: { readerId: currentUser.id },
+          })
+        }
         if (status === 'CHANNEL_ERROR') {
           console.warn('Realtime channel error pada room-chat:', targetGroupId)
         }
@@ -826,8 +838,9 @@ export default function StudyGroupRoom() {
               course?: string | null
             }
             useGroupStore.getState().handleMemberUpdate(updatedRow)
+            const parsedMeta = parseMemberCourseMeta(updatedRow.course)
 
-            // Perbarui state standaloneGroup agar kartu anggota di ruang ini langsung ter-render realtime
+            // Perbarui state standaloneGroup agar kartu anggota & status baca di ruang ini langsung ter-render realtime
             setStandaloneGroup((prev) => {
               if (!prev) return prev
               return {
@@ -840,7 +853,8 @@ export default function StudyGroupRoom() {
                   return {
                     ...m,
                     status: updatedRow.status === 'fokus' ? 'fokus' : 'istirahat',
-                    course: updatedRow.course || m.course,
+                    course: parsedMeta.cleanCourse || m.course,
+                    lastReadByGroup: parsedMeta.lastReadByGroup,
                   }
                 }),
               }
@@ -1660,40 +1674,85 @@ export default function StudyGroupRoom() {
                   </>
                 )}
 
-                {/* Message Timestamp & WhatsApp-Style Read Receipt Checkmarks */}
+                {/* Message Timestamp & WhatsApp-Style Read Receipt Checkmarks + Jumlah Pembaca (1)/(3)/(6) */}
                 <div
-                  className={`mt-1.5 flex items-center justify-end gap-1 text-[10px] ${
+                  className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] ${
                     isOwn ? 'text-white/75' : 'text-[#757780]'
                   }`}
                 >
                   <time>{message.time}</time>
-                  {isOwn && (() => {
-                    const readersOtherThanMe = (message.readBy || []).filter(
-                      (uid) => uid && uid !== currentUser?.id
-                    )
-                    const otherMembersCount = Math.max(0, groupMembers.length - 1)
-                    const isRead =
-                      readersOtherThanMe.length > 0 ||
-                      (otherMembersCount > 0 && groupMembers.some((m) => m.userId !== currentUser?.id && m.status === 'fokus'))
+                  {(() => {
+                    const actualSenderId = isOwn ? currentUser?.id : message.senderId
+                    const readerIds = new Set<string>()
+
+                    // 1. Dari array read_by pada pesan
+                    for (const uid of message.readBy || []) {
+                      if (uid && uid !== actualSenderId) {
+                        readerIds.add(uid)
+                      }
+                    }
+
+                    // 2. Dari metadata lastReadByGroup para anggota grup (jika mereka membuka chat setelah pesan ini dikirim)
+                    const msgTimeMs = message.createdAtMs || 0
+                    for (const member of groupMembers) {
+                      if (!member.userId || member.userId === actualSenderId) continue
+                      const memberReadMs = member.lastReadByGroup?.[targetGroupId] || 0
+                      if (msgTimeMs > 0 && memberReadMs >= msgTimeMs - 5000) {
+                        readerIds.add(member.userId)
+                      }
+                    }
+
+                    // 3. Jika pesan ini dari anggota lain, maka currentUser yang sedang membuka ruangan ini otomatis termasuk pembaca
+                    if (!isOwn && currentUser?.id) {
+                      readerIds.add(currentUser.id)
+                    }
+
+                    const readCount = readerIds.size
+                    const isRead = readCount > 0
+
+                    // Daftar nama pembaca untuk tooltip
+                    const readerNames = Array.from(readerIds)
+                      .map((rid) => {
+                        if (rid === currentUser?.id) return 'Anda'
+                        const found = groupMembers.find((m) => m.userId === rid)
+                        return found?.name.replace(' (Anda)', '').replace(' (Host)', '') || 'Anggota'
+                      })
+                      .join(', ')
+
+                    if (isOwn) {
+                      return (
+                        <span
+                          className="inline-flex items-center gap-0.5"
+                          title={
+                            isRead
+                              ? `Dibaca oleh ${readCount} orang: ${readerNames}`
+                              : 'Terkirim (belum dibaca)'
+                          }
+                        >
+                          <CheckCheck
+                            size={14}
+                            strokeWidth={2.4}
+                            className={isRead ? 'text-[#53BDEB]' : 'text-white/55'}
+                            aria-hidden="true"
+                          />
+                          <span
+                            className={`text-[9px] font-bold ${
+                              isRead ? 'text-[#53BDEB]' : 'text-white/55'
+                            }`}
+                          >
+                            {isRead ? `Dibaca (${readCount})` : 'Terkirim'}
+                          </span>
+                        </span>
+                      )
+                    }
 
                     return (
                       <span
-                        className="inline-flex items-center gap-0.5"
-                        title={
-                          isRead
-                            ? `Dibaca (${Math.max(1, readersOtherThanMe.length)} anggota)`
-                            : 'Terkirim'
-                        }
+                        className="inline-flex items-center gap-0.5 text-[9px] font-bold text-[#1D3668]/75"
+                        title={`Dibaca oleh ${readCount} anggota: ${readerNames}`}
                       >
-                        <CheckCheck
-                          size={14}
-                          strokeWidth={2.4}
-                          className={isRead ? 'text-[#53BDEB]' : 'text-white/55'}
-                          aria-hidden="true"
-                        />
-                        <span className={`text-[9px] font-semibold ${isRead ? 'text-[#53BDEB]' : 'text-white/55'}`}>
-                          {isRead ? 'Dibaca' : ''}
-                        </span>
+                        <CheckCheck size={12} strokeWidth={2.2} className="text-[#0284C7]" />
+                        <span>({readCount})</span>
                       </span>
                     )
                   })()}

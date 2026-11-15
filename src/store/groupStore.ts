@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import {
+  getLocalGroupLastReadMap,
+  parseMemberCourseMeta,
+  setLocalGroupLastRead,
+  syncUserMemberMetaToSupabase,
+} from '../lib/stufoSync'
 import { useAuthStore } from './authStore'
 
 export interface GroupMemberItem {
@@ -11,7 +17,17 @@ export interface GroupMemberItem {
   isHost?: boolean
   userId?: string
   focusStartedAt?: string | null
+  totalFocusSeconds?: number
+  totalSessions?: number
+  lastReadByGroup?: Record<string, number>
   isMuted?: boolean
+}
+
+export interface GroupLastMessagePreview {
+  senderName: string
+  text: string
+  timeLabel: string
+  createdAt: string
 }
 
 export interface StudyGroupItem {
@@ -24,6 +40,8 @@ export interface StudyGroupItem {
   members: GroupMemberItem[]
   createdAt: string
   isMuted?: boolean
+  unreadCount?: number
+  lastMessage?: GroupLastMessagePreview | null
 }
 
 interface SupabaseGroupRow {
@@ -46,6 +64,19 @@ interface SupabaseGroupMemberRow {
   focus_started_at?: string | null
   is_muted?: boolean | null
   joined_at: string
+}
+
+interface SupabaseChatPreviewRow {
+  id: string
+  group_id: string
+  sender_id: string
+  kind: 'text' | 'image' | 'document'
+  text: string | null
+  file_name: string | null
+  image_label: string | null
+  read_by?: string[] | null
+  is_deleted: boolean
+  created_at: string
 }
 
 const MUTED_GROUPS_STORAGE_KEY = 'stufo_muted_groups_v1'
@@ -80,6 +111,20 @@ function generateUniqueCode(): string {
   return code
 }
 
+function formatChatTimeShort(isoString?: string | null): string {
+  if (!isoString) return ''
+  try {
+    const date = new Date(isoString)
+    if (Number.isNaN(date.getTime())) return ''
+    return new Intl.DateTimeFormat('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date)
+  } catch {
+    return ''
+  }
+}
+
 interface GroupState {
   groups: StudyGroupItem[]
   activeGroupId: string
@@ -96,6 +141,11 @@ interface GroupState {
   deleteGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
   toggleMuteGroup: (groupId: string) => Promise<boolean>
   isGroupMuted: (groupId: string) => boolean
+  markGroupChatRead: (groupId: string) => void
+  incrementGroupUnread: (
+    groupId: string,
+    preview?: { senderName?: string; text?: string; createdAt?: string }
+  ) => void
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => void
   syncUserCourse: (userId: string, course: string, name?: string) => void
   handleMemberUpdate: (payload: {
@@ -143,25 +193,36 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
       const groupIds = memberRows.map((m) => m.group_id)
 
-      // 2. Ambil data study_groups
-      const { data: groupsData, error: groupsErr } = await supabase
-        .from('study_groups')
-        .select('*')
-        .in('id', groupIds)
-        .order('created_at', { ascending: false })
+      // 2. Ambil data study_groups, study_group_members, dan pesan chat terbaru secara paralel
+      const [
+        { data: groupsData, error: groupsErr },
+        { data: allMembers, error: allMembersErr },
+        { data: recentMessages },
+      ] = await Promise.all([
+        supabase
+          .from('study_groups')
+          .select('*')
+          .in('id', groupIds)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('study_group_members')
+          .select('*')
+          .in('group_id', groupIds),
+        supabase
+          .from('group_chat_messages')
+          .select('id, group_id, sender_id, kind, text, file_name, image_label, read_by, is_deleted, created_at')
+          .in('group_id', groupIds)
+          .order('created_at', { ascending: false })
+          .limit(300),
+      ])
 
       if (groupsErr) throw groupsErr
-
-      // 3. Ambil data seluruh anggota di grup-grup tersebut
-      const { data: allMembers, error: allMembersErr } = await supabase
-        .from('study_group_members')
-        .select('*')
-        .in('group_id', groupIds)
-
       if (allMembersErr) throw allMembersErr
 
-      // 4. Ambil profil para anggota untuk nama & jurusan
-      const memberUserIds = Array.from(new Set((allMembers || []).map((m: SupabaseGroupMemberRow) => m.user_id)))
+      // 3. Ambil profil para anggota untuk nama & jurusan
+      const memberUserIds = Array.from(
+        new Set((allMembers || []).map((m: SupabaseGroupMemberRow) => m.user_id))
+      )
       let profileMap = new Map<string, { name: string; major?: string }>()
 
       if (memberUserIds.length > 0) {
@@ -176,15 +237,31 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       }
 
       const currentUser = useAuthStore.getState().user
+      const localLastReadMap = getLocalGroupLastReadMap()
 
-      // 5. Susun StudyGroupItem[]
-      const formattedGroups: StudyGroupItem[] = ((groupsData as SupabaseGroupRow[] | null) || []).map((g) => {
-        const groupMemberList: GroupMemberItem[] = ((allMembers as SupabaseGroupMemberRow[] | null) || [])
+      // Cari metadata baris milik currentUser untuk mengetahui lastReadByGroup di cloud
+      const myMemberRows = ((allMembers as SupabaseGroupMemberRow[] | null) || []).filter(
+        (m) => m.user_id === currentUserId
+      )
+      const cloudLastReadMap: Record<string, number> = {}
+      for (const myRow of myMemberRows) {
+        const parsed = parseMemberCourseMeta(myRow.course)
+        Object.assign(cloudLastReadMap, parsed.lastReadByGroup)
+      }
+
+      // 4. Susun StudyGroupItem[]
+      const formattedGroups: StudyGroupItem[] = (
+        (groupsData as SupabaseGroupRow[] | null) || []
+      ).map((g) => {
+        const groupMemberList: GroupMemberItem[] = (
+          (allMembers as SupabaseGroupMemberRow[] | null) || []
+        )
           .filter((m) => m.group_id === g.id)
           .map((m) => {
             const profile = profileMap.get(m.user_id)
             const isCurrentUser = m.user_id === currentUserId
-            const name = profile?.name || (isCurrentUser ? currentUser?.name || 'Anda' : 'Mahasiswa')
+            const name =
+              profile?.name || (isCurrentUser ? currentUser?.name || 'Anda' : 'Mahasiswa')
             const initials =
               name
                 .split(' ')
@@ -193,10 +270,11 @@ export const useGroupStore = create<GroupState>((set, get) => ({
                 .join('')
                 .toUpperCase() || 'M'
 
+            const parsedMeta = parseMemberCourseMeta(m.course)
             const resolvedCourse =
               (isCurrentUser && currentUser?.major) ||
               profile?.major ||
-              m.course ||
+              parsedMeta.cleanCourse ||
               'Mahasiswa'
 
             return {
@@ -205,9 +283,13 @@ export const useGroupStore = create<GroupState>((set, get) => ({
               name: isCurrentUser ? `${name} (Anda)` : name,
               avatar: initials,
               status: m.status === 'fokus' ? 'fokus' : 'istirahat',
-              course: resolvedCourse,
+              course: parseMemberCourseMeta(resolvedCourse).cleanCourse,
               isHost: m.role === 'owner',
-              focusStartedAt: m.focus_started_at || m.joined_at || null,
+              focusStartedAt:
+                parsedMeta.startedAtIso || m.focus_started_at || m.joined_at || null,
+              totalFocusSeconds: parsedMeta.totalFocusSeconds,
+              totalSessions: parsedMeta.totalSessions,
+              lastReadByGroup: parsedMeta.lastReadByGroup,
               isMuted: Boolean(m.is_muted),
             }
           })
@@ -226,6 +308,47 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             ? localMutedMap[g.id]
             : Boolean(myMemberRow?.is_muted)
 
+        // Hitung jumlah pesan belum dibaca & pesan terakhir untuk grup ini (gaya WhatsApp)
+        const groupMsgs = ((recentMessages as SupabaseChatPreviewRow[] | null) || []).filter(
+          (msg) => msg.group_id === g.id
+        )
+        const lastReadMs = Math.max(
+          localLastReadMap[g.id] || 0,
+          cloudLastReadMap[g.id] || 0
+        )
+
+        let unreadCount = 0
+        for (const msg of groupMsgs) {
+          if (msg.sender_id === currentUserId) continue
+          const readByArr = Array.isArray(msg.read_by) ? msg.read_by : []
+          if (readByArr.includes(currentUserId)) continue
+          const msgTimeMs = new Date(msg.created_at).getTime()
+          if (lastReadMs > 0 && msgTimeMs <= lastReadMs) continue
+          unreadCount += 1
+        }
+
+        let lastMessage: GroupLastMessagePreview | null = null
+        if (groupMsgs.length > 0) {
+          const newest = groupMsgs[0] // karena di-order descending
+          const senderProfile = profileMap.get(newest.sender_id)
+          const senderName =
+            newest.sender_id === currentUserId
+              ? 'Anda'
+              : senderProfile?.name?.split(' ')[0] || 'Rekan'
+          const previewText = newest.is_deleted
+            ? 'Pesan ini telah dihapus'
+            : newest.text ||
+              (newest.file_name ? `📎 ${newest.file_name}` : '') ||
+              (newest.image_label ? `🖼️ ${newest.image_label}` : 'Lampiran berkas')
+
+          lastMessage = {
+            senderName,
+            text: previewText,
+            timeLabel: formatChatTimeShort(newest.created_at),
+            createdAt: newest.created_at,
+          }
+        }
+
         return {
           id: g.id,
           name: g.name,
@@ -236,6 +359,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           members: groupMemberList,
           createdAt: g.created_at,
           isMuted: resolvedMuted,
+          unreadCount,
+          lastMessage,
         }
       })
 
@@ -252,7 +377,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       })
     } catch (err) {
       console.error('SUPABASE ERROR (fetchMyGroups):', err)
-      const message = err instanceof Error ? err.message : 'Gagal memuat ruang belajar dari Supabase.'
+      const message =
+        err instanceof Error ? err.message : 'Gagal memuat ruang belajar dari Supabase.'
       set({ isLoading: false, error: message })
     }
   },
@@ -332,6 +458,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         hostId: currentUser.id,
         members: [hostItem],
         createdAt: newGroupRow.created_at,
+        unreadCount: 0,
+        lastMessage: null,
       }
 
       set((state) => ({
@@ -340,6 +468,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         activeGroupId: createdItem.id,
         error: null,
       }))
+
+      void syncUserMemberMetaToSupabase({ userId: currentUser.id })
 
       return { success: true, group: createdItem }
     } catch (err) {
@@ -363,7 +493,6 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
 
     try {
-      // a. Cari grup berdasarkan join_code
       const { data: targetGroupRow, error: groupErr } = await supabase
         .from('study_groups')
         .select('*')
@@ -376,8 +505,6 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         return { success: false, error: 'Kode ruangan tidak valid' }
       }
 
-      // b. Lakukan insert ke study_group_members.
-      // Database trigger check_max_group_members akan menangani jika grup sudah penuh (>= 6)
       const { error: insertMemberErr } = await supabase
         .from('study_group_members')
         .insert({
@@ -390,10 +517,13 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
       if (insertMemberErr) {
         const errLower = insertMemberErr.message.toLowerCase()
-        if (errLower.includes('penuh') || errLower.includes('maks') || insertMemberErr.code === 'P0001') {
+        if (
+          errLower.includes('penuh') ||
+          errLower.includes('maks') ||
+          insertMemberErr.code === 'P0001'
+        ) {
           return { success: false, error: 'Maaf, ruang belajar sudah penuh (Maks 10 orang)' }
         }
-        // Jika user sudah terdaftar di grup ini (unique constraint uq_group_user)
         if (
           insertMemberErr.code === '23505' ||
           errLower.includes('duplicate') ||
@@ -407,7 +537,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         throw insertMemberErr
       }
 
-      // Berhasil gabung, refresh groups
+      void syncUserMemberMetaToSupabase({ userId: currentUser.id })
       await get().fetchMyGroups(currentUser.id)
       get().setActiveGroup(targetGroupRow.id)
       const joinedGroup = get().groups.find((g) => g.id === targetGroupRow.id)
@@ -415,7 +545,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       return { success: true, group: joinedGroup }
     } catch (err) {
       console.error('SUPABASE ERROR (joinGroup):', err)
-      const message = err instanceof Error ? err.message : 'Gagal bergabung ke ruang belajar.'
+      const message =
+        err instanceof Error ? err.message : 'Gagal bergabung ke ruang belajar.'
       set({ error: message })
       return { success: false, error: message }
     }
@@ -447,7 +578,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       return { success: true }
     } catch (err) {
       console.error('SUPABASE ERROR (leaveGroup):', err)
-      const message = err instanceof Error ? err.message : 'Gagal keluar dari ruang belajar.'
+      const message =
+        err instanceof Error ? err.message : 'Gagal keluar dari ruang belajar.'
       return { success: false, error: message }
     }
   },
@@ -471,7 +603,10 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       return { success: true }
     } catch (err) {
       console.error('SUPABASE ERROR (kickMember):', err)
-      const message = err instanceof Error ? err.message : 'Gagal mengeluarkan anggota dari ruang belajar.'
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Gagal mengeluarkan anggota dari ruang belajar.'
       return { success: false, error: message }
     }
   },
@@ -539,6 +674,64 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     return nextMuted
   },
 
+  markGroupChatRead: (groupId: string) => {
+    if (!groupId) return
+    const nowMs = Date.now()
+    setLocalGroupLastRead(groupId, nowMs)
+
+    set((state) => {
+      const updatedGroups = state.groups.map((g) =>
+        g.id === groupId ? { ...g, unreadCount: 0 } : g
+      )
+      const updatedActive =
+        state.activeGroup?.id === groupId
+          ? { ...state.activeGroup, unreadCount: 0 }
+          : state.activeGroup
+      return { groups: updatedGroups, activeGroup: updatedActive }
+    })
+
+    const currentUserId = useAuthStore.getState().user?.id
+    if (currentUserId) {
+      void syncUserMemberMetaToSupabase({
+        userId: currentUserId,
+        groupReadId: groupId,
+      })
+    }
+  },
+
+  incrementGroupUnread: (groupId, preview) => {
+    if (!groupId) return
+    const createdAt = preview?.createdAt || new Date().toISOString()
+    const timeLabel = formatChatTimeShort(createdAt)
+
+    set((state) => {
+      const updatedGroups = state.groups.map((g) => {
+        if (g.id !== groupId) return g
+        const nextUnread = (g.unreadCount || 0) + 1
+        const nextLastMessage: GroupLastMessagePreview | null = preview
+          ? {
+              senderName: preview.senderName || 'Rekan',
+              text: preview.text || 'Pesan baru',
+              timeLabel,
+              createdAt,
+            }
+          : g.lastMessage || null
+        return {
+          ...g,
+          unreadCount: nextUnread,
+          lastMessage: nextLastMessage,
+        }
+      })
+
+      const updatedActive =
+        state.activeGroup?.id === groupId
+          ? updatedGroups.find((g) => g.id === groupId) || state.activeGroup
+          : state.activeGroup
+
+      return { groups: updatedGroups, activeGroup: updatedActive }
+    })
+  },
+
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => {
     get().handleMemberUpdate({
       user_id: userId,
@@ -558,58 +751,67 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   }) => {
     const targetUserId = payload.user_id
     const targetMemberId = payload.id
-    const newStatus: 'fokus' | 'istirahat' = payload.status === 'fokus' ? 'fokus' : 'istirahat'
-    const newCourse = payload.course
+    const newStatus: 'fokus' | 'istirahat' =
+      payload.status === 'fokus' ? 'fokus' : 'istirahat'
+    const parsedMeta = payload.course ? parseMemberCourseMeta(payload.course) : null
+    const newCourse = parsedMeta?.cleanCourse
     const nextFocusStartedAt =
       newStatus === 'fokus'
-        ? payload.focus_started_at || new Date().toISOString()
+        ? parsedMeta?.startedAtIso || payload.focus_started_at || new Date().toISOString()
         : null
 
     set((state) => {
+      const updateMember = (m: GroupMemberItem): GroupMemberItem => {
+        const isMatch =
+          (targetMemberId && m.id === targetMemberId) ||
+          (targetUserId && m.userId === targetUserId)
+        if (!isMatch) return m
+        return {
+          ...m,
+          status: newStatus,
+          focusStartedAt:
+            m.status === 'fokus' && newStatus === 'fokus'
+              ? parsedMeta?.startedAtIso || m.focusStartedAt || nextFocusStartedAt
+              : nextFocusStartedAt,
+          ...(newCourse ? { course: newCourse } : {}),
+          ...(parsedMeta
+            ? {
+                totalFocusSeconds: parsedMeta.totalFocusSeconds,
+                totalSessions: parsedMeta.totalSessions,
+                lastReadByGroup: parsedMeta.lastReadByGroup,
+              }
+            : {}),
+        }
+      }
+
       const updatedGroups = state.groups.map((g) => {
         if (payload.group_id && g.id !== payload.group_id) {
           return g
         }
         return {
           ...g,
-          members: g.members.map((m) => {
-            const isMatch = (targetMemberId && m.id === targetMemberId) || (targetUserId && m.userId === targetUserId)
-            if (!isMatch) return m
-            return {
-              ...m,
-              status: newStatus,
-              focusStartedAt: m.status === 'fokus' && newStatus === 'fokus' ? (m.focusStartedAt || nextFocusStartedAt) : nextFocusStartedAt,
-              ...(newCourse ? { course: newCourse } : {}),
-            }
-          }),
+          members: g.members.map(updateMember),
         }
       })
 
-      const updatedActive = state.activeGroup && (!payload.group_id || state.activeGroup.id === payload.group_id)
-        ? {
-            ...state.activeGroup,
-            members: state.activeGroup.members.map((m) => {
-              const isMatch = (targetMemberId && m.id === targetMemberId) || (targetUserId && m.userId === targetUserId)
-              if (!isMatch) return m
-              return {
-                ...m,
-                status: newStatus,
-                focusStartedAt: m.status === 'fokus' && newStatus === 'fokus' ? (m.focusStartedAt || nextFocusStartedAt) : nextFocusStartedAt,
-                ...(newCourse ? { course: newCourse } : {}),
-              }
-            }),
-          }
-        : state.activeGroup
+      const updatedActive =
+        state.activeGroup && (!payload.group_id || state.activeGroup.id === payload.group_id)
+          ? {
+              ...state.activeGroup,
+              members: state.activeGroup.members.map(updateMember),
+            }
+          : state.activeGroup
 
       return { groups: updatedGroups, activeGroup: updatedActive }
     })
   },
 
   syncUserCourse: (userId: string, course: string, name?: string) => {
+    const clean = parseMemberCourseMeta(course).cleanCourse
     set((state) => {
       const updateMember = (m: GroupMemberItem): GroupMemberItem => {
         if (m.userId !== userId) return m
-        const cleanCourse = course.trim() || m.course
+        const cleanCourse = clean || m.course
         let nextName = m.name
         if (name && name.trim()) {
           const suffix = m.name.includes('(Host)')

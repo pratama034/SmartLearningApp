@@ -33,7 +33,9 @@ const navigation: { label: string; to: string; icon: LucideIcon }[] = [
 function NavigationItems({ mobile = false }: { mobile?: boolean }) {
   const activeBlock = useSessionStore((state) => state.activeBlock)
   const focusStatus = useSessionStore((state) => state.status)
+  const groups = useGroupStore((state) => state.groups)
   const hasActiveSession = Boolean(activeBlock && focusStatus !== 'idle')
+  const totalUnreadMessages = groups.reduce((acc, g) => acc + (g.unreadCount || 0), 0)
 
   return (
     <nav
@@ -42,6 +44,7 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
     >
       {navigation.map(({ label, to, icon: Icon }) => {
         const isFocus = to === '/focus'
+        const isCoFocus = to === '/cofocus'
 
         return (
           <NavLink
@@ -70,11 +73,21 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
                       <span className="relative inline-flex h-2.5 w-2.5 rounded-full border-2 border-white bg-[#BE2257]" />
                     </span>
                   )}
+                  {isCoFocus && totalUnreadMessages > 0 && mobile && (
+                    <span className="absolute -right-2 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-[#17623A] px-1 text-[9px] font-extrabold text-white shadow-xs">
+                      {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}
+                    </span>
+                  )}
                 </span>
                 <span className={mobile ? 'max-w-full truncate' : 'flex-1'}>{label}</span>
                 {isFocus && hasActiveSession && !mobile && (
                   <span className="rounded-full bg-[#D6F0DE] px-2 py-0.5 text-[10px] font-bold text-[#17623A]">
                     LIVE
+                  </span>
+                )}
+                {isCoFocus && totalUnreadMessages > 0 && !mobile && (
+                  <span className="grid h-5 min-w-[20px] place-items-center rounded-full bg-[#17623A] px-1.5 text-[10px] font-extrabold text-white shadow-xs">
+                    {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}
                   </span>
                 )}
               </>
@@ -168,15 +181,31 @@ export default function Layout() {
             sender_id?: string
             text?: string | null
             file_name?: string | null
+            created_at?: string
           }
           if (!row?.group_id || row.sender_id === uid) return
 
-          const { groups, isGroupMuted } = useGroupStore.getState()
+          const { groups, isGroupMuted, incrementGroupUnread } = useGroupStore.getState()
           const targetGroup = groups.find((g) => g.id === row.group_id)
           if (!targetGroup) return
-          if (isGroupMuted(row.group_id)) return
 
           const preview = row.text || (row.file_name ? `Lampiran: ${row.file_name}` : 'Pesan baru di grup')
+          const senderMember = targetGroup.members.find((m) => m.userId === row.sender_id)
+          const senderFirstName = senderMember?.name.replace(' (Host)', '').split(' ')[0] || 'Rekan'
+
+          const isCurrentlyInsideRoom =
+            typeof window !== 'undefined' &&
+            window.location.pathname.includes(`/group/${row.group_id}`)
+
+          if (!isCurrentlyInsideRoom) {
+            incrementGroupUnread(row.group_id, {
+              senderName: senderFirstName,
+              text: preview,
+              createdAt: row.created_at,
+            })
+          }
+
+          if (isGroupMuted(row.group_id)) return
           setIncomingChatPopup({
             groupId: row.group_id,
             groupName: targetGroup.name,

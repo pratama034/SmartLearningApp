@@ -15,8 +15,10 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { parseMemberCourseMeta, syncUserMemberMetaToSupabase } from '../lib/stufoSync'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useSessionStore } from '../store/sessionStore'
 
 type ReportTab = 'personal' | 'friends'
 type PeriodRange = 'weekly' | 'monthly' | 'yearly'
@@ -62,6 +64,7 @@ interface FriendLeaderboardItem {
   sessionCount: number
   isCurrentUser: boolean
   isGroupPeer: boolean
+  isCurrentlyFocusing?: boolean
 }
 
 const DAYS_SHORT = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
@@ -201,17 +204,17 @@ export default function Reports() {
   const [isLoadingFriends, setIsLoadingFriends] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch data sesi pribadi
+  // Fetch data sesi pribadi & sinkronisasi otomatis
   useEffect(() => {
     let isMounted = true
 
-    async function fetchPersonalReport() {
+    async function fetchPersonalReport(silent = false) {
       if (!user?.id) {
         if (isMounted) setIsLoadingPersonal(false)
         return
       }
 
-      setIsLoadingPersonal(true)
+      if (!silent) setIsLoadingPersonal(true)
       setError(null)
 
       try {
@@ -228,141 +231,277 @@ export default function Reports() {
         if (isMounted) {
           setPersonalSessions((data as FocusSessionRow[] | null) ?? [])
         }
+        // Pastikan total durasi fokus user saat ini tersinkron ke study_group_members untuk teman grup
+        void syncUserMemberMetaToSupabase({ userId: user.id })
       } catch (err) {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setError(err instanceof Error ? err.message : 'Gagal memuat laporan fokus.')
         }
       } finally {
-        if (isMounted) setIsLoadingPersonal(false)
+        if (isMounted && !silent) setIsLoadingPersonal(false)
       }
     }
 
-    void fetchPersonalReport()
+    void fetchPersonalReport(false)
     return () => {
       isMounted = false
     }
   }, [user?.id])
 
-  // Fetch data Leaderboard / Peringkat Teman
+  // Fetch data Leaderboard / Peringkat Teman secara Realtime
   useEffect(() => {
     let isMounted = true
 
-    async function fetchFriendsLeaderboard() {
-      setIsLoadingFriends(true)
+    async function fetchFriendsLeaderboard(silent = false) {
+      if (!silent) setIsLoadingFriends(true)
       try {
         const currentUid = user?.id
+        const nowMs = Date.now()
 
-        // 1. Coba panggil RPC get_friends_leaderboard terlebih dahulu
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_friends_leaderboard')
+        // 1. Ambil keanggotaan grup & seluruh study_group_members agar metadata durasi & fokus aktif teman terbaca
+        const groupPeerIds = new Set<string>()
+        if (currentUid) groupPeerIds.add(currentUid)
 
-        if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
-          if (isMounted) {
-            const mapped: FriendLeaderboardItem[] = (rpcData as FriendLeaderboardRpcRow[]).map((row) => {
-              const isMe = Boolean(currentUid && row.user_id === currentUid)
-              const cleanName = row.full_name || 'Mahasiswa StuFo'
-              const firstName = cleanName.split(' ')[0] || cleanName
-              const totalSec = Number(row.total_focus_seconds ?? 0)
-              return {
-                userId: row.user_id,
-                name: isMe ? `${cleanName} (Anda)` : cleanName,
-                shortName: isMe ? `${firstName} (Anda)` : firstName.slice(0, 12),
-                major: row.major || 'Mahasiswa',
-                university: row.university || 'Kampus',
-                streak: Number(row.streak ?? 0),
-                totalSeconds: totalSec,
-                totalMinutes: Math.max(0, Math.round(totalSec / 60)),
-                sessionCount: Number(row.total_sessions ?? 0),
-                isCurrentUser: isMe,
-                isGroupPeer: Boolean(row.is_group_peer),
-              }
-            })
-            mapped.sort((a, b) => b.totalSeconds - a.totalSeconds)
-            setFriendsList(mapped)
-            setIsLoadingFriends(false)
-          }
-          return
-        }
+        const { data: allMemberRows } = await supabase
+          .from('study_group_members')
+          .select('user_id, group_id, status, course, focus_started_at')
 
-        // 2. Fallback langsung dari tabel study_group_members + profiles + focus_sessions
-        let groupPeerIds = new Set<string>()
+        const typedMemberRows =
+          (allMemberRows as Array<{
+            user_id: string
+            group_id: string
+            status: string
+            course: string | null
+            focus_started_at?: string | null
+          }> | null) || []
+
         if (currentUid) {
-          groupPeerIds.add(currentUid)
-          const { data: myGroups } = await supabase
-            .from('study_group_members')
-            .select('group_id')
-            .eq('user_id', currentUid)
-
-          const gIds = (myGroups || []).map((g: { group_id: string }) => g.group_id)
-          if (gIds.length > 0) {
-            const { data: peerMembers } = await supabase
-              .from('study_group_members')
-              .select('user_id')
-              .in('group_id', gIds)
-
-            for (const pm of (peerMembers as Array<{ user_id: string }>) || []) {
-              groupPeerIds.add(pm.user_id)
+          const myGroupIds = new Set(
+            typedMemberRows.filter((m) => m.user_id === currentUid).map((m) => m.group_id)
+          )
+          for (const m of typedMemberRows) {
+            if (myGroupIds.has(m.group_id)) {
+              groupPeerIds.add(m.user_id)
             }
           }
         }
 
-        const [{ data: profilesData }, { data: sessionsData }] = await Promise.all([
-          supabase.from('profiles').select('id, name, major, university, streak, is_private_profile'),
+        // Ekstrak metadata durasi & status fokus aktif dari study_group_members
+        const memberMetaByUser = new Map<
+          string,
+          {
+            cleanCourse: string
+            metaSeconds: number
+            metaSessions: number
+            isFocusing: boolean
+            liveActiveSeconds: number
+          }
+        >()
+
+        for (const m of typedMemberRows) {
+          const parsed = parseMemberCourseMeta(m.course)
+          const prev = memberMetaByUser.get(m.user_id)
+          const isFocusing = m.status === 'fokus'
+          const startIso = parsed.startedAtIso || m.focus_started_at || null
+          let liveActiveSeconds = 0
+          if (isFocusing && startIso) {
+            const startMs = new Date(startIso).getTime()
+            if (!Number.isNaN(startMs) && nowMs > startMs) {
+              const diffSec = Math.floor((nowMs - startMs) / 1000)
+              if (diffSec > 0 && diffSec <= 6 * 3600) {
+                liveActiveSeconds = diffSec
+              }
+            }
+          }
+
+          if (!prev) {
+            memberMetaByUser.set(m.user_id, {
+              cleanCourse: parsed.cleanCourse,
+              metaSeconds: parsed.totalFocusSeconds,
+              metaSessions: parsed.totalSessions,
+              isFocusing,
+              liveActiveSeconds,
+            })
+          } else {
+            memberMetaByUser.set(m.user_id, {
+              cleanCourse:
+                parsed.cleanCourse !== 'Mahasiswa' ? parsed.cleanCourse : prev.cleanCourse,
+              metaSeconds: Math.max(prev.metaSeconds, parsed.totalFocusSeconds),
+              metaSessions: Math.max(prev.metaSessions, parsed.totalSessions),
+              isFocusing: prev.isFocusing || isFocusing,
+              liveActiveSeconds: Math.max(prev.liveActiveSeconds, liveActiveSeconds),
+            })
+          }
+        }
+
+        // Jika user sendiri sedang fokus aktif di store lokal, ambil elapsedSeconds langsung
+        const localSession = useSessionStore.getState()
+        const myLiveElapsed =
+          localSession.status === 'running' || localSession.status === 'paused'
+            ? Math.max(0, localSession.elapsedSeconds)
+            : 0
+
+        // 2. Ambil data RPC get_friends_leaderboard (jika tersedia) + profiles + focus_sessions secara paralel
+        const [rpcResult, { data: profilesData }, { data: sessionsData }] = await Promise.all([
+          supabase.rpc('get_friends_leaderboard'),
+          supabase
+            .from('profiles')
+            .select('id, name, major, university, streak, is_private_profile'),
           supabase.from('focus_sessions').select('user_id, actual_duration, duration_seconds'),
         ])
 
         const durationByUser = new Map<string, { seconds: number; count: number }>()
         for (const s of (sessionsData as FocusSessionRow[] | null) || []) {
           const sec = Number(s.actual_duration ?? s.duration_seconds ?? 0)
+          if (sec <= 0) continue
           const cur = durationByUser.get(s.user_id) || { seconds: 0, count: 0 }
-          cur.seconds += Math.max(0, sec)
+          cur.seconds += sec
           cur.count += 1
           durationByUser.set(s.user_id, cur)
         }
 
-        const fallbackItems: FriendLeaderboardItem[] = (
-          (profilesData as Array<{
+        const rpcMap = new Map<string, FriendLeaderboardRpcRow>()
+        if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+          for (const r of rpcResult.data as FriendLeaderboardRpcRow[]) {
+            rpcMap.set(r.user_id, r)
+          }
+        }
+
+        // Gabungkan semua user ID yang relevan (dari profiles, rpc, dan anggota grup)
+        const allUserIds = new Set<string>()
+        for (const p of (profilesData as Array<{ id: string }> | null) || []) {
+          allUserIds.add(p.id)
+        }
+        for (const uidKey of rpcMap.keys()) {
+          allUserIds.add(uidKey)
+        }
+        for (const uidKey of groupPeerIds) {
+          allUserIds.add(uidKey)
+        }
+
+        const profileMap = new Map(
+          ((profilesData as Array<{
             id: string
             name: string | null
             major: string | null
             university: string | null
             streak: number | null
-          }>) || []
-        ).map((p) => {
-          const isMe = Boolean(currentUid && p.id === currentUid)
-          const cleanName = p.name?.trim() || 'Mahasiswa StuFo'
-          const firstName = cleanName.split(' ')[0] || cleanName
-          const stat = durationByUser.get(p.id) || { seconds: 0, count: 0 }
+          }>) || []).map((p) => [p.id, p])
+        )
+
+        const combinedItems: FriendLeaderboardItem[] = Array.from(allUserIds).map((uidKey) => {
+          const isMe = Boolean(currentUid && uidKey === currentUid)
+          const prof = profileMap.get(uidKey)
+          const rpcRow = rpcMap.get(uidKey)
+          const sessionStat = durationByUser.get(uidKey) || { seconds: 0, count: 0 }
+          const memberMeta = memberMetaByUser.get(uidKey)
+
+          const rawName =
+            prof?.name?.trim() ||
+            rpcRow?.full_name?.trim() ||
+            (isMe ? user?.name || 'Anda' : 'Mahasiswa StuFo')
+          const firstName = rawName.split(' ')[0] || rawName
+
+          const rawMajor =
+            prof?.major?.trim() ||
+            rpcRow?.major?.trim() ||
+            memberMeta?.cleanCourse ||
+            'Mahasiswa'
+          const cleanMajor = parseMemberCourseMeta(rawMajor).cleanCourse
+
+          const completedSeconds = Math.max(
+            Number(rpcRow?.total_focus_seconds ?? 0),
+            sessionStat.seconds,
+            memberMeta?.metaSeconds ?? 0
+          )
+          const liveSeconds = isMe
+            ? Math.max(myLiveElapsed, memberMeta?.liveActiveSeconds ?? 0)
+            : memberMeta?.liveActiveSeconds ?? 0
+
+          const totalSec = completedSeconds + liveSeconds
+          const completedCount = Math.max(
+            Number(rpcRow?.total_sessions ?? 0),
+            sessionStat.count,
+            memberMeta?.metaSessions ?? 0
+          )
+          const sessionCount =
+            completedCount === 0 && totalSec > 0 ? 1 : completedCount
+
+          // Jika sudah fokus > 0 detik (misal 1 menit atau 45 detik), pastikan minimal tercatat 1 menit
+          const totalMinutes =
+            totalSec > 0 ? Math.max(1, Math.round(totalSec / 60)) : 0
+
           return {
-            userId: p.id,
-            name: isMe ? `${cleanName} (Anda)` : cleanName,
+            userId: uidKey,
+            name: isMe ? `${rawName} (Anda)` : rawName,
             shortName: isMe ? `${firstName} (Anda)` : firstName.slice(0, 12),
-            major: p.major || 'Mahasiswa',
-            university: p.university || 'Kampus',
-            streak: Number(p.streak ?? 0),
-            totalSeconds: stat.seconds,
-            totalMinutes: Math.max(0, Math.round(stat.seconds / 60)),
-            sessionCount: stat.count,
+            major: cleanMajor,
+            university: prof?.university || rpcRow?.university || 'Kampus',
+            streak: Number(prof?.streak ?? rpcRow?.streak ?? 0),
+            totalSeconds: totalSec,
+            totalMinutes,
+            sessionCount,
             isCurrentUser: isMe,
-            isGroupPeer: isMe || groupPeerIds.has(p.id),
+            isGroupPeer: Boolean(isMe || groupPeerIds.has(uidKey) || rpcRow?.is_group_peer),
+            isCurrentlyFocusing: Boolean(
+              (isMe && myLiveElapsed > 0) || memberMeta?.isFocusing
+            ),
           }
         })
 
-        fallbackItems.sort((a, b) => b.totalSeconds - a.totalSeconds)
+        combinedItems.sort(
+          (a, b) => b.totalSeconds - a.totalSeconds || b.sessionCount - a.sessionCount
+        )
+
         if (isMounted) {
-          setFriendsList(fallbackItems)
+          setFriendsList(combinedItems)
         }
       } catch (err) {
         console.warn('Gagal memuat leaderboard teman:', err)
       } finally {
-        if (isMounted) setIsLoadingFriends(false)
+        if (isMounted && !silent) setIsLoadingFriends(false)
       }
     }
 
-    void fetchFriendsLeaderboard()
+    void fetchFriendsLeaderboard(false)
+
+    // Polling ringan setiap 5 detik + langganan Realtime agar Leaderboard langsung sinkron otomatis
+    const pollInterval = window.setInterval(() => {
+      void fetchFriendsLeaderboard(true)
+    }, 5000)
+
+    const leaderboardChannel = supabase
+      .channel(`leaderboard-live:${user?.id || 'anon'}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'focus_sessions' },
+        () => {
+          void fetchFriendsLeaderboard(true)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'study_group_members' },
+        () => {
+          void fetchFriendsLeaderboard(true)
+        }
+      )
+      .subscribe()
+
+    const broadcastChannel = supabase
+      .channel('stufo-realtime-sync')
+      .on('broadcast', { event: 'focus_or_leaderboard_updated' }, () => {
+        void fetchFriendsLeaderboard(true)
+      })
+      .subscribe()
+
     return () => {
       isMounted = false
+      window.clearInterval(pollInterval)
+      void supabase.removeChannel(leaderboardChannel)
+      void supabase.removeChannel(broadcastChannel)
     }
-  }, [user?.id])
+  }, [user?.id, user?.name])
 
   // Kalkulasi metrik pribadi (Tanpa kartu "Total Selesai" sesuai revisi halaman 6 PDF)
   const personalStats = useMemo(() => {
@@ -378,9 +517,11 @@ export default function Reports() {
       }
     }
 
-    const totalFocusMinutes = Math.round(totalFocusSeconds / 60)
+    const totalFocusMinutes =
+      totalFocusSeconds > 0 ? Math.max(1, Math.round(totalFocusSeconds / 60)) : 0
     const activeDaysCount = Math.max(1, activeDates.size)
-    const avgMinutesPerDay = personalSessions.length > 0 ? Math.round(totalFocusMinutes / activeDaysCount) : 0
+    const avgMinutesPerDay =
+      personalSessions.length > 0 ? Math.max(1, Math.round(totalFocusMinutes / activeDaysCount)) : 0
 
     return {
       totalFocusMinutes,
@@ -422,7 +563,8 @@ export default function Reports() {
 
       const points: ChartPoint[] = DAYS_SHORT.map((dayName, i) => ({
         label: dayName,
-        focusMinutes: Math.round(bucketSeconds[i] / 60),
+        focusMinutes:
+          bucketSeconds[i] > 0 ? Math.max(1, Math.round(bucketSeconds[i] / 60)) : 0,
       }))
       const periodTotalMinutes = points.reduce((acc, p) => acc + p.focusMinutes, 0)
 
@@ -464,7 +606,7 @@ export default function Reports() {
 
       const points: ChartPoint[] = weekBuckets.map((sec, idx) => ({
         label: `Mgg ${idx + 1}`,
-        focusMinutes: Math.round(sec / 60),
+        focusMinutes: sec > 0 ? Math.max(1, Math.round(sec / 60)) : 0,
       }))
       const periodTotalMinutes = points.reduce((acc, p) => acc + p.focusMinutes, 0)
 
@@ -500,7 +642,8 @@ export default function Reports() {
 
     const points: ChartPoint[] = MONTHS_SHORT.map((mName, idx) => ({
       label: mName,
-      focusMinutes: Math.round(monthBuckets[idx] / 60),
+      focusMinutes:
+        monthBuckets[idx] > 0 ? Math.max(1, Math.round(monthBuckets[idx] / 60)) : 0,
     }))
     const periodTotalMinutes = points.reduce((acc, p) => acc + p.focusMinutes, 0)
 
@@ -839,6 +982,12 @@ export default function Reports() {
                                 <p className="truncate text-sm font-extrabold text-[#1F2C4F]">
                                   {friend.name}
                                 </p>
+                                {friend.isCurrentlyFocusing && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D6F0DE] px-2 py-0.5 text-[10px] font-bold text-[#17623A]">
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#17623A]" />
+                                    Sedang Fokus
+                                  </span>
+                                )}
                                 {friend.streak > 0 && (
                                   <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-100 px-2 py-0.2 text-[10px] font-bold text-orange-700">
                                     <Flame size={11} className="fill-orange-500 text-orange-500" />
