@@ -251,7 +251,7 @@ export default function Auth({ initialView = 'welcome' }: AuthProps) {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[#17623A]" />
-                <span>Klik tautan <strong>Confirm your email</strong> di pesan dari Smart Focus.</span>
+                <span>Klik tautan <strong>Confirm your email</strong> di pesan dari StuFo.</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[#17623A]" />
@@ -304,11 +304,11 @@ export default function Auth({ initialView = 'welcome' }: AuthProps) {
             <div className="mt-2 flex flex-col items-center text-center">
               <img
                 src="/logo.jpg"
-                alt="Logo Smart Focus Akademik"
-                className="h-14 w-14 rounded-2xl object-contain shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
+                alt="Logo StuFo (Study & Focus)"
+                className="h-14 w-14 rounded-2xl object-cover shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
               />
               <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-[#BE2257]">
-                Smart Focus Akademik
+                StuFo (Study &amp; Focus)
               </p>
               <h1 className="mt-1 text-[24px] font-extrabold leading-8 text-[#1F2C4F]">
                 Buat Akun Baru
@@ -508,11 +508,11 @@ export default function Auth({ initialView = 'welcome' }: AuthProps) {
             <div className="mt-2 flex flex-col items-center text-center">
               <img
                 src="/logo.jpg"
-                alt="Logo Smart Focus Akademik"
-                className="h-14 w-14 rounded-2xl object-contain shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
+                alt="Logo StuFo (Study & Focus)"
+                className="h-14 w-14 rounded-2xl object-cover shadow-md shadow-[#1D3668]/20 border border-[#1D3668]/15"
               />
               <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-[#BE2257]">
-                Smart Focus Akademik
+                StuFo (Study &amp; Focus)
               </p>
               <h1 className="mt-1 text-[24px] font-extrabold leading-8 text-[#1F2C4F]">
                 Masuk ke Akun Anda

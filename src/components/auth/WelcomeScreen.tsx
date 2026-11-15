@@ -17,8 +17,8 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
           <div className="relative">
             <img
               src="/logo.jpg"
-              alt="Logo Smart Focus Akademik"
-              className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-contain shadow-lg shadow-[#1D3668]/20 border border-[#1D3668]/15"
+              alt="Logo StuFo (Study & Focus)"
+              className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover shadow-lg shadow-[#1D3668]/20 border border-[#1D3668]/15"
             />
             <span
               className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#BE2257] text-[10px] text-white ring-2 ring-white shadow-sm"
@@ -29,15 +29,15 @@ export default function WelcomeScreen({ onNavigate }: WelcomeScreenProps) {
           </div>
 
           <p className="mt-5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#BE2257]">
-            Smart Focus Akademik
+            StuFo (Study &amp; Focus)
           </p>
 
           <h1 className="mt-2 text-[26px] font-extrabold leading-8 tracking-tight text-[#1F2C4F] sm:text-[30px] sm:leading-9">
-            Selamat Datang di Smart Focus
+            Selamat Datang di StuFo
           </h1>
 
           <p className="mt-3 text-xs leading-relaxed text-[#56638A] sm:text-sm">
-            Pendamping digital cerdas untuk menyusun jadwal belajar terstruktur, menjaga fokus bebas distraksi, dan kolaborasi ruang co-focus bersama mahasiswa.
+            Pendamping belajar cerdas bersama <strong>Hooty si Burung Hantu</strong> untuk mengatur jadwal kalender belajar, timer &amp; stopwatch fokus spontan, serta ruang co-focus bersama teman.
           </p>
         </div>
 

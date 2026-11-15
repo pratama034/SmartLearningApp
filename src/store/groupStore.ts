@@ -10,6 +10,8 @@ export interface GroupMemberItem {
   course: string
   isHost?: boolean
   userId?: string
+  focusStartedAt?: string | null
+  isMuted?: boolean
 }
 
 export interface StudyGroupItem {
@@ -21,6 +23,7 @@ export interface StudyGroupItem {
   hostId: string
   members: GroupMemberItem[]
   createdAt: string
+  isMuted?: boolean
 }
 
 interface SupabaseGroupRow {
@@ -40,7 +43,32 @@ interface SupabaseGroupMemberRow {
   role: 'owner' | 'member'
   status: 'fokus' | 'istirahat' | 'tersedia'
   course: string | null
+  focus_started_at?: string | null
+  is_muted?: boolean | null
   joined_at: string
+}
+
+const MUTED_GROUPS_STORAGE_KEY = 'stufo_muted_groups_v1'
+
+function getLocalMutedGroups(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(MUTED_GROUPS_STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function setLocalMutedGroup(groupId: string, isMuted: boolean) {
+  if (typeof window === 'undefined') return
+  try {
+    const current = getLocalMutedGroups()
+    current[groupId] = isMuted
+    window.localStorage.setItem(MUTED_GROUPS_STORAGE_KEY, JSON.stringify(current))
+  } catch {
+    // ignore storage errors
+  }
 }
 
 function generateUniqueCode(): string {
@@ -66,6 +94,8 @@ interface GroupState {
   leaveGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
   kickMember: (groupId: string, targetUserId: string) => Promise<{ success: boolean; error?: string }>
   deleteGroup: (groupId: string) => Promise<{ success: boolean; error?: string }>
+  toggleMuteGroup: (groupId: string) => Promise<boolean>
+  isGroupMuted: (groupId: string) => boolean
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => void
   syncUserCourse: (userId: string, course: string, name?: string) => void
   handleMemberUpdate: (payload: {
@@ -74,6 +104,8 @@ interface GroupState {
     group_id?: string
     status?: string
     course?: string | null
+    focus_started_at?: string | null
+    is_muted?: boolean | null
   }) => void
 }
 
@@ -175,6 +207,8 @@ export const useGroupStore = create<GroupState>((set, get) => ({
               status: m.status === 'fokus' ? 'fokus' : 'istirahat',
               course: resolvedCourse,
               isHost: m.role === 'owner',
+              focusStartedAt: m.focus_started_at || m.joined_at || null,
+              isMuted: Boolean(m.is_muted),
             }
           })
 
@@ -182,6 +216,15 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         if (g.max_members && g.max_members < 10) {
           void supabase.from('study_groups').update({ max_members: 10 }).eq('id', g.id)
         }
+
+        const localMutedMap = getLocalMutedGroups()
+        const myMemberRow = ((allMembers as SupabaseGroupMemberRow[] | null) || []).find(
+          (m) => m.group_id === g.id && m.user_id === currentUserId
+        )
+        const resolvedMuted =
+          typeof localMutedMap[g.id] === 'boolean'
+            ? localMutedMap[g.id]
+            : Boolean(myMemberRow?.is_muted)
 
         return {
           id: g.id,
@@ -192,6 +235,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           hostId: g.host_id,
           members: groupMemberList,
           createdAt: g.created_at,
+          isMuted: resolvedMuted,
         }
       })
 
@@ -456,8 +500,51 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     }
   },
 
+  isGroupMuted: (groupId: string) => {
+    const group = get().groups.find((g) => g.id === groupId)
+    if (group && typeof group.isMuted === 'boolean') return group.isMuted
+    const localMuted = getLocalMutedGroups()
+    return Boolean(localMuted[groupId])
+  },
+
+  toggleMuteGroup: async (groupId: string) => {
+    const currentMuted = get().isGroupMuted(groupId)
+    const nextMuted = !currentMuted
+    setLocalMutedGroup(groupId, nextMuted)
+
+    set((state) => {
+      const updatedGroups = state.groups.map((g) =>
+        g.id === groupId ? { ...g, isMuted: nextMuted } : g
+      )
+      const updatedActive =
+        state.activeGroup?.id === groupId
+          ? { ...state.activeGroup, isMuted: nextMuted }
+          : state.activeGroup
+      return { groups: updatedGroups, activeGroup: updatedActive }
+    })
+
+    const currentUser = useAuthStore.getState().user
+    if (currentUser?.id) {
+      try {
+        await supabase
+          .from('study_group_members')
+          .update({ is_muted: nextMuted })
+          .eq('group_id', groupId)
+          .eq('user_id', currentUser.id)
+      } catch {
+        // Kolom is_muted opsional bila migrasi SQL belum dijalankan
+      }
+    }
+
+    return nextMuted
+  },
+
   syncUserStatus: (userId: string, status: 'fokus' | 'istirahat') => {
-    get().handleMemberUpdate({ user_id: userId, status })
+    get().handleMemberUpdate({
+      user_id: userId,
+      status,
+      focus_started_at: status === 'fokus' ? new Date().toISOString() : null,
+    })
   },
 
   handleMemberUpdate: (payload: {
@@ -466,11 +553,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     group_id?: string
     status?: string
     course?: string | null
+    focus_started_at?: string | null
+    is_muted?: boolean | null
   }) => {
     const targetUserId = payload.user_id
     const targetMemberId = payload.id
     const newStatus: 'fokus' | 'istirahat' = payload.status === 'fokus' ? 'fokus' : 'istirahat'
     const newCourse = payload.course
+    const nextFocusStartedAt =
+      newStatus === 'fokus'
+        ? payload.focus_started_at || new Date().toISOString()
+        : null
 
     set((state) => {
       const updatedGroups = state.groups.map((g) => {
@@ -485,6 +578,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             return {
               ...m,
               status: newStatus,
+              focusStartedAt: m.status === 'fokus' && newStatus === 'fokus' ? (m.focusStartedAt || nextFocusStartedAt) : nextFocusStartedAt,
               ...(newCourse ? { course: newCourse } : {}),
             }
           }),
@@ -500,6 +594,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
               return {
                 ...m,
                 status: newStatus,
+                focusStartedAt: m.status === 'fokus' && newStatus === 'fokus' ? (m.focusStartedAt || nextFocusStartedAt) : nextFocusStartedAt,
                 ...(newCourse ? { course: newCourse } : {}),
               }
             }),

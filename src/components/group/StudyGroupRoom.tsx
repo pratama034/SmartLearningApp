@@ -2,6 +2,8 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  Bell,
+  BellOff,
   Check,
   CheckCheck,
   Copy,
@@ -14,6 +16,7 @@ import {
   MessageSquareText,
   Paperclip,
   PlusCircle,
+  Presentation,
   Reply,
   Send,
   ShieldCheck,
@@ -49,11 +52,12 @@ export interface Message {
   text?: string
   fileUrl?: string
   fileName?: string
-  fileType?: 'PDF' | 'Word' | 'JPG'
+  fileType?: 'PDF' | 'Word' | 'JPG' | 'PPT'
   fileSize?: string
   imageUrl?: string
   imageLabel?: string
   replyTo?: string
+  readBy?: string[]
   isDeleted?: boolean
 }
 
@@ -66,10 +70,11 @@ interface SupabaseChatMessageRow {
   text: string | null
   file_url: string | null
   file_name: string | null
-  file_type: 'PDF' | 'Word' | 'JPG' | null
+  file_type: 'PDF' | 'Word' | 'JPG' | 'PPT' | null
   file_size: string | null
   image_url: string | null
   image_label: string | null
+  read_by?: string[] | null
   is_deleted: boolean
   created_at: string
 }
@@ -118,6 +123,10 @@ function mapSupabaseRowToMessage(
     ? new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(row.created_at))
     : new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 
+  const resolvedFileType: 'PDF' | 'Word' | 'JPG' | 'PPT' | undefined =
+    (row.file_type as 'PDF' | 'Word' | 'JPG' | 'PPT') ||
+    (row.file_name && /\.pptx?$/i.test(row.file_name) ? 'PPT' : undefined)
+
   return {
     id: row.id,
     senderId: isOwn ? 'current-user' : row.sender_id,
@@ -128,11 +137,12 @@ function mapSupabaseRowToMessage(
     text: row.is_deleted ? 'Pesan ini telah dihapus' : (row.text || undefined),
     fileUrl: row.file_url || undefined,
     fileName: row.file_name || undefined,
-    fileType: (row.file_type as 'PDF' | 'Word' | 'JPG') || undefined,
+    fileType: resolvedFileType,
     fileSize: row.file_size || undefined,
     imageUrl: row.image_url || undefined,
     imageLabel: row.image_label || undefined,
     replyTo: row.reply_to_id || undefined,
+    readBy: Array.isArray(row.read_by) ? row.read_by : [],
     isDeleted: Boolean(row.is_deleted),
   }
 }
@@ -221,8 +231,10 @@ function MessageAttachment({
 
   if (message.kind === 'document') {
     const fileName = message.fileName || 'Tugas_Kelompok.pdf'
-    const fileType = message.fileType || 'PDF'
+    const fileType =
+      message.fileType || (/\.pptx?$/i.test(fileName) ? 'PPT' : 'PDF')
     const isPdf = fileType === 'PDF'
+    const isPpt = fileType === 'PPT'
     const downloadHref =
       message.fileUrl ||
       `https://smart-learning-app-mu.vercel.app/downloads/${encodeURIComponent(fileName)}`
@@ -237,10 +249,14 @@ function MessageAttachment({
       >
         <span
           className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
-            isPdf ? 'bg-[#FCDDE6] text-[#8E1744]' : 'bg-[#E1EAF8] text-[#1D3668]'
+            isPdf
+              ? 'bg-[#FCDDE6] text-[#8E1744]'
+              : isPpt
+                ? 'bg-orange-100 text-orange-700'
+                : 'bg-[#E1EAF8] text-[#1D3668]'
           }`}
         >
-          <FileText size={18} aria-hidden="true" />
+          {isPpt ? <Presentation size={18} aria-hidden="true" /> : <FileText size={18} aria-hidden="true" />}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -253,16 +269,20 @@ function MessageAttachment({
                   ? isOwn
                     ? 'bg-rose-400/20 text-rose-200'
                     : 'bg-[#FCDDE6] text-[#8E1744]'
-                  : isOwn
-                    ? 'bg-blue-400/20 text-blue-200'
-                    : 'bg-[#E1EAF8] text-[#1D3668]'
+                  : isPpt
+                    ? isOwn
+                      ? 'bg-orange-400/25 text-orange-200'
+                      : 'bg-orange-100 text-orange-700'
+                    : isOwn
+                      ? 'bg-blue-400/20 text-blue-200'
+                      : 'bg-[#E1EAF8] text-[#1D3668]'
               }`}
             >
               {fileType}
             </span>
           </div>
           <span className={`mt-0.5 block text-[11px] ${isOwn ? 'text-white/75' : 'text-[#56638A]'}`}>
-            {fileType} · {message.fileSize || (isPdf ? '2.4 MB' : '1.5 MB')}
+            {fileType} · {message.fileSize || (isPdf ? '2.4 MB' : isPpt ? '3.6 MB' : '1.5 MB')}
           </span>
         </div>
         <a
@@ -289,7 +309,7 @@ function MessageAttachment({
 
 const EMPTY_MEMBERS: GroupMemberItem[] = []
 
-type AttachmentType = 'pdf' | 'word' | 'jpg'
+type AttachmentType = 'pdf' | 'word' | 'jpg' | 'ppt'
 
 export default function StudyGroupRoom() {
   const navigate = useNavigate()
@@ -304,6 +324,8 @@ export default function StudyGroupRoom() {
   const kickMember = useGroupStore((state) => state.kickMember)
   const deleteGroup = useGroupStore((state) => state.deleteGroup)
   const leaveGroup = useGroupStore((state) => state.leaveGroup)
+  const toggleMuteGroup = useGroupStore((state) => state.toggleMuteGroup)
+  const isGroupMuted = useGroupStore((state) => state.isGroupMuted)
   const isGroupsLoading = useGroupStore((state) => state.isLoading)
 
   // Target group ID from route or store
@@ -316,6 +338,22 @@ export default function StudyGroupRoom() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoadingMessages, setIsLoadingMessages] = useState(true)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [isMuted, setIsMuted] = useState<boolean>(() =>
+    targetGroupId ? useGroupStore.getState().isGroupMuted(targetGroupId) : false
+  )
+  const [chatToast, setChatToast] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (targetGroupId) {
+      setIsMuted(isGroupMuted(targetGroupId))
+    }
+  }, [targetGroupId, isGroupMuted, groups])
+
+  useEffect(() => {
+    if (!chatToast) return
+    const timer = window.setTimeout(() => setChatToast(null), 4000)
+    return () => window.clearTimeout(timer)
+  }, [chatToast])
 
   // Confirmation Modals State
   const [confirmKickTarget, setConfirmKickTarget] = useState<GroupMemberItem | null>(null)
@@ -541,6 +579,13 @@ export default function StudyGroupRoom() {
             mapSupabaseRowToMessage(row, currentUser?.id, groupMembersRef.current, profilesCacheRef.current)
           )
           setMessages(mapped)
+
+          // Tandai pesan di ruangan ini sudah dibaca oleh user saat ini (Read Receipt ala WhatsApp)
+          if (currentUser?.id) {
+            void supabase
+              .rpc('mark_group_messages_read', { p_group_id: targetGroupId })
+              .then(() => undefined, () => undefined)
+          }
         }
       } catch (err) {
         console.error('SUPABASE ERROR (loadChatHistory catch):', err)
@@ -607,6 +652,10 @@ export default function StudyGroupRoom() {
             ? new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date(incomingRow.created_at))
             : new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(new Date())
 
+          const resolvedFileType: 'PDF' | 'Word' | 'JPG' | 'PPT' | undefined =
+            (incomingRow.file_type as 'PDF' | 'Word' | 'JPG' | 'PPT') ||
+            (incomingRow.file_name && /\.pptx?$/i.test(incomingRow.file_name) ? 'PPT' : undefined)
+
           const newMessageWithProfile: Message = {
             id: incomingRow.id,
             senderId: isOwn ? 'current-user' : incomingRow.sender_id,
@@ -616,11 +665,12 @@ export default function StudyGroupRoom() {
             kind: incomingRow.kind,
             text: incomingRow.is_deleted ? 'Pesan ini telah dihapus' : (incomingRow.text || undefined),
             fileName: incomingRow.file_name || undefined,
-            fileType: (incomingRow.file_type as 'PDF' | 'Word' | 'JPG') || undefined,
+            fileType: resolvedFileType,
             fileSize: incomingRow.file_size || undefined,
             imageUrl: incomingRow.image_url || undefined,
             imageLabel: incomingRow.image_label || undefined,
             replyTo: incomingRow.reply_to_id || undefined,
+            readBy: Array.isArray(incomingRow.read_by) ? incomingRow.read_by : [],
             isDeleted: Boolean(incomingRow.is_deleted),
           }
 
@@ -631,6 +681,68 @@ export default function StudyGroupRoom() {
             }
             return [...prev, newMessageWithProfile]
           })
+
+          // Jika pesan dari anggota lain: munculkan notifikasi (kecuali grup sedang di-mute) & tandai sudah dibaca
+          if (!isOwn) {
+            const groupCurrentlyMuted = useGroupStore.getState().isGroupMuted(targetGroupId)
+            if (!groupCurrentlyMuted) {
+              const previewText =
+                newMessageWithProfile.text ||
+                newMessageWithProfile.fileName ||
+                newMessageWithProfile.imageLabel ||
+                'Mengirim lampiran berkas'
+              setChatToast(`💬 ${senderName}: ${previewText}`)
+
+              // Bunyi pop halus untuk pesan masuk
+              try {
+                const AudioCtx =
+                  window.AudioContext ||
+                  (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+                if (AudioCtx) {
+                  const ctx = new AudioCtx()
+                  const osc = ctx.createOscillator()
+                  const gain = ctx.createGain()
+                  osc.type = 'sine'
+                  osc.frequency.setValueAtTime(587.33, ctx.currentTime)
+                  gain.gain.setValueAtTime(0.12, ctx.currentTime)
+                  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16)
+                  osc.connect(gain)
+                  gain.connect(ctx.destination)
+                  osc.start()
+                  osc.stop(ctx.currentTime + 0.16)
+                }
+              } catch {
+                // ignore
+              }
+
+              // Browser Notification
+              try {
+                if (
+                  typeof window !== 'undefined' &&
+                  'Notification' in window &&
+                  Notification.permission === 'granted'
+                ) {
+                  new Notification(`Pesan Grup · ${senderName}`, {
+                    body: previewText,
+                    icon: '/logo.jpg',
+                  })
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            if (currentUser?.id) {
+              void supabase
+                .rpc('mark_group_messages_read', { p_group_id: targetGroupId })
+                .then(() => undefined, () => undefined)
+              void chatChannel.send({
+                type: 'broadcast',
+                event: 'messages_read',
+                payload: { readerId: currentUser.id, messageId: incomingRow.id },
+              })
+            }
+          }
         }
       )
       .on(
@@ -652,6 +764,7 @@ export default function StudyGroupRoom() {
                   ...msg,
                   isDeleted: Boolean(updatedRow.is_deleted),
                   text: updatedRow.is_deleted ? 'Pesan ini telah dihapus' : (updatedRow.text || msg.text),
+                  readBy: Array.isArray(updatedRow.read_by) ? updatedRow.read_by : msg.readBy,
                 }
               }
               return msg
@@ -659,6 +772,21 @@ export default function StudyGroupRoom() {
           )
         }
       )
+      .on('broadcast', { event: 'messages_read' }, (payload) => {
+        const readerId = (payload.payload as { readerId?: string })?.readerId
+        if (!readerId || readerId === currentUser?.id) return
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.senderId === 'current-user') {
+              const currentReads = msg.readBy || []
+              if (!currentReads.includes(readerId)) {
+                return { ...msg, readBy: [...currentReads, readerId] }
+              }
+            }
+            return msg
+          })
+        )
+      })
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR') {
           console.warn('Realtime channel error pada room-chat:', targetGroupId)
@@ -866,6 +994,8 @@ export default function StudyGroupRoom() {
         fileInputRef.current.accept = '.pdf,application/pdf'
       } else if (type === 'word') {
         fileInputRef.current.accept = '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      } else if (type === 'ppt') {
+        fileInputRef.current.accept = '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation'
       } else if (type === 'jpg') {
         fileInputRef.current.accept = '.jpg,.jpeg,.png,image/jpeg,image/png'
       }
@@ -884,7 +1014,7 @@ export default function StudyGroupRoom() {
     const customText = draft.trim()
 
     let kind: 'text' | 'image' | 'document' = 'document'
-    let fileType: 'PDF' | 'Word' | 'JPG' | null = null
+    let fileType: 'PDF' | 'Word' | 'JPG' | 'PPT' | null = null
     let imageLabel: string | null = null
     let text = customText
 
@@ -896,6 +1026,10 @@ export default function StudyGroupRoom() {
       kind = 'document'
       fileType = 'Word'
       if (!text) text = `Melampirkan dokumen Word: ${fileName}`
+    } else if (lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')) {
+      kind = 'document'
+      fileType = 'PPT'
+      if (!text) text = `Melampirkan presentasi PPT: ${fileName}`
     } else if (
       lowerName.endsWith('.jpg') ||
       lowerName.endsWith('.jpeg') ||
@@ -911,6 +1045,10 @@ export default function StudyGroupRoom() {
         kind = 'document'
         fileType = 'Word'
         if (!text) text = `Melampirkan dokumen Word: ${fileName}`
+      } else if (activeUploadType === 'ppt') {
+        kind = 'document'
+        fileType = 'PPT'
+        if (!text) text = `Melampirkan presentasi PPT: ${fileName}`
       } else {
         kind = 'document'
         fileType = 'PDF'
@@ -923,7 +1061,7 @@ export default function StudyGroupRoom() {
     event.target.value = ''
 
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('group_chat_messages')
         .insert({
           group_id: targetGroupId,
@@ -940,11 +1078,38 @@ export default function StudyGroupRoom() {
         .select('*')
         .single<SupabaseChatMessageRow>()
 
+      // Fallback jika constraint file_type di DB belum di-migrate untuk 'PPT'
+      if (error && fileType === 'PPT') {
+        const retryRes = await supabase
+          .from('group_chat_messages')
+          .insert({
+            group_id: targetGroupId,
+            sender_id: currentUser.id,
+            reply_to_id: replyId,
+            kind,
+            file_name: fileName.endsWith('.ppt') || fileName.endsWith('.pptx') ? fileName : `${fileName}.pptx`,
+            file_type: null,
+            file_size: sizeStr,
+            image_label: imageLabel,
+            text,
+            is_deleted: false,
+          })
+          .select('*')
+          .single<SupabaseChatMessageRow>()
+        data = retryRes.data
+        error = retryRes.error
+      }
+
       if (error) {
         console.error('SUPABASE ERROR (handleFileSelected):', error)
         setChatError(error.message)
       } else if (data) {
-        const formatted = mapSupabaseRowToMessage(data, currentUser.id, groupMembers, profilesCacheRef.current)
+        const formatted = mapSupabaseRowToMessage(
+          { ...data, file_type: fileType || data.file_type },
+          currentUser.id,
+          groupMembers,
+          profilesCacheRef.current
+        )
         setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
       }
     } catch (err) {
@@ -1046,7 +1211,7 @@ export default function StudyGroupRoom() {
           sender_id: currentUser.id,
           reply_to_id: replyId,
           kind: 'image',
-          image_label: 'Diagram_Alur_Sistem_SmartFocus.jpg',
+          image_label: 'Diagram_Alur_Sistem_StuFo.jpg',
           file_size: '1.9 MB',
           text: note,
           is_deleted: false,
@@ -1064,6 +1229,80 @@ export default function StudyGroupRoom() {
     } catch (err) {
       console.error('SUPABASE ERROR (sendSampleJpg):', err)
     }
+  }
+
+  async function sendSamplePpt() {
+    setShowAttachmentMenu(false)
+    if (!targetGroupId || !currentUser?.id) return
+
+    const replyId = replyingTo?.id || null
+    const note = draft.trim() || 'Slide presentasi kelompok format PowerPoint (.pptx) untuk bahan latihan presentasi.'
+    setDraft('')
+    setReplyingTo(null)
+
+    try {
+      let { data, error } = await supabase
+        .from('group_chat_messages')
+        .insert({
+          group_id: targetGroupId,
+          sender_id: currentUser.id,
+          reply_to_id: replyId,
+          kind: 'document',
+          file_name: 'Slide_Presentasi_Kelompok_StuFo.pptx',
+          file_type: 'PPT',
+          file_size: '3.6 MB',
+          text: note,
+          is_deleted: false,
+        })
+        .select('*')
+        .single<SupabaseChatMessageRow>()
+
+      if (error) {
+        const retryRes = await supabase
+          .from('group_chat_messages')
+          .insert({
+            group_id: targetGroupId,
+            sender_id: currentUser.id,
+            reply_to_id: replyId,
+            kind: 'document',
+            file_name: 'Slide_Presentasi_Kelompok_StuFo.pptx',
+            file_type: null,
+            file_size: '3.6 MB',
+            text: note,
+            is_deleted: false,
+          })
+          .select('*')
+          .single<SupabaseChatMessageRow>()
+        data = retryRes.data
+        error = retryRes.error
+      }
+
+      if (error) {
+        console.error('SUPABASE ERROR (sendSamplePpt):', error)
+        setChatError(error.message)
+      } else if (data) {
+        const formatted = mapSupabaseRowToMessage(
+          { ...data, file_type: 'PPT' },
+          currentUser.id,
+          groupMembers,
+          profilesCacheRef.current
+        )
+        setMessages((prev) => (prev.some((m) => m.id === formatted.id) ? prev : [...prev, formatted]))
+      }
+    } catch (err) {
+      console.error('SUPABASE ERROR (sendSamplePpt):', err)
+    }
+  }
+
+  async function handleToggleMute() {
+    if (!targetGroupId) return
+    const nextMuted = await toggleMuteGroup(targetGroupId)
+    setIsMuted(nextMuted)
+    setChatToast(
+      nextMuted
+        ? '🔇 Notifikasi grup dibisukan (Muted)'
+        : '🔔 Notifikasi grup diaktifkan kembali'
+    )
   }
 
   // Send normal text message
@@ -1237,8 +1476,24 @@ export default function StudyGroupRoom() {
           </button>
         </div>
 
-        {/* Action Header: Salin Kode & Buka Info Anggota */}
+        {/* Action Header: Mute Grup, Salin Kode & Buka Info Anggota */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Tombol Mute / Unmute Grup Chat */}
+          <button
+            type="button"
+            onClick={() => void handleToggleMute()}
+            aria-label={isMuted ? 'Aktifkan notifikasi grup' : 'Bisukan (Mute) notifikasi grup'}
+            title={isMuted ? 'Grup Dibisukan (Klik untuk Unmute)' : 'Bisukan Notifikasi Grup (Mute)'}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-bold transition active:scale-95 ${
+              isMuted
+                ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                : 'border-[#DFE4F1] bg-[#F6F7FC] text-[#56638A] hover:border-[#1D3668]/30 hover:text-[#1D3668]'
+            }`}
+          >
+            {isMuted ? <BellOff size={15} className="text-amber-600" /> : <Bell size={15} />}
+            <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Mute'}</span>
+          </button>
+
           {joinCode && (
             <button
               type="button"
@@ -1267,6 +1522,24 @@ export default function StudyGroupRoom() {
           </button>
         </div>
       </header>
+
+      {/* Toast Notifikasi Chat Masuk / Status Mute */}
+      {chatToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center justify-between gap-2 border-b border-[#1D3668]/15 bg-[#E1EAF8] px-4 py-2 text-xs font-bold text-[#1D3668] shadow-xs"
+        >
+          <span className="truncate">{chatToast}</span>
+          <button
+            type="button"
+            onClick={() => setChatToast(null)}
+            className="rounded p-0.5 text-[#1D3668] hover:bg-white/50"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Global Error Banner */}
       {chatError && (
@@ -1387,14 +1660,43 @@ export default function StudyGroupRoom() {
                   </>
                 )}
 
-                {/* Message Timestamp & Checkmarks */}
+                {/* Message Timestamp & WhatsApp-Style Read Receipt Checkmarks */}
                 <div
                   className={`mt-1.5 flex items-center justify-end gap-1 text-[10px] ${
-                    isOwn ? 'text-white/70' : 'text-[#757780]'
+                    isOwn ? 'text-white/75' : 'text-[#757780]'
                   }`}
                 >
                   <time>{message.time}</time>
-                  {isOwn && <CheckCheck size={13} className="text-[#9CC3FF]" aria-hidden="true" />}
+                  {isOwn && (() => {
+                    const readersOtherThanMe = (message.readBy || []).filter(
+                      (uid) => uid && uid !== currentUser?.id
+                    )
+                    const otherMembersCount = Math.max(0, groupMembers.length - 1)
+                    const isRead =
+                      readersOtherThanMe.length > 0 ||
+                      (otherMembersCount > 0 && groupMembers.some((m) => m.userId !== currentUser?.id && m.status === 'fokus'))
+
+                    return (
+                      <span
+                        className="inline-flex items-center gap-0.5"
+                        title={
+                          isRead
+                            ? `Dibaca (${Math.max(1, readersOtherThanMe.length)} anggota)`
+                            : 'Terkirim'
+                        }
+                      >
+                        <CheckCheck
+                          size={14}
+                          strokeWidth={2.4}
+                          className={isRead ? 'text-[#53BDEB]' : 'text-white/55'}
+                          aria-hidden="true"
+                        />
+                        <span className={`text-[9px] font-semibold ${isRead ? 'text-[#53BDEB]' : 'text-white/55'}`}>
+                          {isRead ? 'Dibaca' : ''}
+                        </span>
+                      </span>
+                    )
+                  })()}
                 </div>
 
                 {/* Hover / Long-press Actions (Reply & Delete) */}
@@ -1516,7 +1818,38 @@ export default function StudyGroupRoom() {
               </div>
             </div>
 
-            {/* Opsi 3: JPG */}
+            {/* Opsi 3: Presentasi PPT (.ppt / .pptx) */}
+            <div className="rounded-xl border border-[#DFE4F1] bg-[#F6F7FC] p-2.5 transition hover:bg-orange-50/70 hover:border-orange-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-orange-100 text-orange-700">
+                    <Presentation size={17} />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-[#1F2C4F]">Presentasi PPT (.pptx)</p>
+                    <p className="text-[10px] text-[#56638A]">Slide presentasi kuliah &amp; kelompok</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => triggerNativeUpload('ppt')}
+                  className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-[#1D3668] py-1.5 text-[11px] font-bold text-white transition hover:bg-[#162B54]"
+                >
+                  <Upload size={12} /> Unggah PPT
+                </button>
+                <button
+                  type="button"
+                  onClick={sendSamplePpt}
+                  className="rounded-lg border border-[#DFE4F1] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#56638A] transition hover:bg-[#F6F7FC]"
+                >
+                  Sampel PPT
+                </button>
+              </div>
+            </div>
+
+            {/* Opsi 4: JPG */}
             <div className="rounded-xl border border-[#DFE4F1] bg-[#F6F7FC] p-2.5 transition hover:bg-[#F5FBF7] hover:border-[#D6F0DE]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">

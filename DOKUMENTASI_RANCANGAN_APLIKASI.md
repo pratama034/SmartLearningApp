@@ -515,3 +515,4 @@ Untuk pengembangan berikutnya, rekomendasi yang dapat dilakukan mencakup:
 1. **Push Notification Pengingat Jadwal**: Menambahkan notifikasi lokal Android sebelum blok belajar dimulai (misal: H-15 menit).
 2. **Kategori Notifikasi Berbasis AI**: Memanfaatkan LLM untuk membedakan pesan darurat dari keluarga/dosen vs pesan distraksi umum, sehingga pesan darurat dapat tetap diizinkan tembus (*smart bypass*).
 3. **Penyimpanan Suara / Audio Focus**: Menambahkan pemutar suara latar belakang fokus (*white noise*, *binaural beats*, atau *lo-fi music*) langsung di dalam layar Mode Fokus.
+

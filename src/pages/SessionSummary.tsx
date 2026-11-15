@@ -1,11 +1,12 @@
 import {
   AlertCircle,
-  BellOff,
+  BellRing,
   CheckCircle2,
   Clock3,
   Flame,
   Loader2,
   NotebookPen,
+  Sparkles,
   X,
 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
@@ -58,7 +59,6 @@ export default function SessionSummary() {
 
     if (!summary) return
 
-    // Simpan snapshot lokal agar UI tidak berkedip saat state di-reset ke idle
     setCompletedSnapshot(summary)
 
     try {
@@ -112,7 +112,26 @@ export default function SessionSummary() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 sm:space-y-6">
-      {/* Toast/Alert Hijau Sukses */}
+      {/* Notifikasi Timer Selesai */}
+      {summary.timerCompletedNotification && (
+        <div
+          role="status"
+          aria-live="assertive"
+          className="flex items-center gap-3 rounded-2xl border border-[#1D3668]/20 bg-[#E1EAF8] p-4 text-[#1D3668] shadow-sm"
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#1D3668] text-white">
+            <BellRing size={20} className="animate-bounce" />
+          </span>
+          <div>
+            <p className="text-sm font-extrabold">⏰ Waktu Timer Fokus Telah Selesai! 🎉</p>
+            <p className="text-xs text-[#1F2C4F]/85">
+              Durasi belajarmu untuk <strong>{summary.block.title}</strong> sudah otomatis disimpan
+              ke Laporan dan Leaderboard Teman.
+            </p>
+          </div>
+        </div>
+      )}
+
       {showSuccessToast && (
         <div
           role="status"
@@ -131,7 +150,6 @@ export default function SessionSummary() {
         </div>
       )}
 
-      {/* Toast/Alert Merah Error */}
       {storeError && (
         <div
           role="alert"
@@ -161,7 +179,7 @@ export default function SessionSummary() {
           Bagaimana fokusmu hari ini?
         </h1>
         <p className="mt-2 text-[13px] leading-[19px] text-[#56638A]">
-          Ringkasan untuk {summary.block.title} sudah siap untuk direfleksikan.
+          Ringkasan untuk <strong>{summary.block.title}</strong> sudah siap untuk direfleksikan.
         </p>
       </section>
 
@@ -171,63 +189,32 @@ export default function SessionSummary() {
             <Clock3 size={20} aria-hidden="true" />
           </span>
           <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
-            Durasi sesi
+            Durasi Fokus Aktual
           </p>
           <p className="mt-1 text-2xl font-extrabold tabular-nums text-[#1F2C4F]">
             {formatDuration(summary.durationSeconds)}
           </p>
           <p className="mt-1 text-xs text-[#56638A]">
-            Target: {formatDuration(summary.targetDurationSeconds)}
+            {summary.modeKind === 'stopwatch'
+              ? 'Mode Stopwatch (Hitung Maju)'
+              : `Target: ${formatDuration(summary.targetDurationSeconds)}`}
           </p>
         </article>
+
         <article className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#FCDDE6] text-[#8E1744]">
-            <BellOff size={20} aria-hidden="true" />
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#D6F0DE] text-[#17623A]">
+            <Sparkles size={20} aria-hidden="true" />
           </span>
           <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.08em] text-[#757780]">
-            Notifikasi ditunda
+            Status Penyelesaian
           </p>
-          <p className="mt-1 text-2xl font-extrabold tabular-nums text-[#1F2C4F]">
-            {summary.heldNotifications.length}
+          <p className="mt-1 text-2xl font-extrabold text-[#17623A]">
+            {summary.completionStatus === 'completed' ? 'Tuntas 100%' : 'Selesai Lebih Awal'}
+          </p>
+          <p className="mt-1 text-xs text-[#56638A]">
+            Tercatat ke grafik laporan &amp; leaderboard teman
           </p>
         </article>
-      </section>
-
-      <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
-        <h2 className="text-[18px] font-bold leading-6 text-[#1F2C4F]">Notifikasi yang ditunda</h2>
-        <div className="mt-4 space-y-2.5">
-          {summary.heldNotifications.length ? (
-            summary.heldNotifications.map((notification) => {
-              const displayTitle = notification.title || notification.appName || 'Notifikasi Masuk'
-              const displayText = notification.text.startsWith(displayTitle + ': ')
-                ? notification.text.slice(displayTitle.length + 2)
-                : notification.text
-
-              return (
-                <article
-                  key={notification.id}
-                  className="rounded-xl border border-[#FCDDE6] bg-[#FFF7F8] p-3 text-sm font-medium text-[#1F2C4F]"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-[#1F2C4F]">{displayTitle}</span>
-                    {notification.appName && (
-                      <span className="rounded-full bg-[#E1EAF8] px-2 py-0.5 text-[10px] font-bold text-[#1D3668]">
-                        {notification.appName}
-                      </span>
-                    )}
-                  </div>
-                  {displayText && (
-                    <p className="mt-1 text-xs text-[#56638A]">{displayText}</p>
-                  )}
-                </article>
-              )
-            })
-          ) : (
-            <p className="rounded-xl bg-[#F6F7FC] p-4 text-sm text-[#56638A]">
-              Tidak ada notifikasi yang perlu ditinjau.
-            </p>
-          )}
-        </div>
       </section>
 
       <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)]">
@@ -259,13 +246,14 @@ export default function SessionSummary() {
             </p>
           )}
           <p className="mt-2 text-xs text-[#56638A]">
-            Laporan durasi fokus & poin streak telah tercatat otomatis. Isi refleksi di atas untuk memperbarui catatan sesi ini.
+            Laporan durasi fokus &amp; poin streak telah tercatat otomatis. Isi refleksi di atas
+            untuk memperbarui catatan sesi ini.
           </p>
           <div className="mt-4 flex flex-col gap-2.5 sm:flex-row">
             <button
               type="submit"
               disabled={isSaving || showSuccessToast}
-              className="flex h-[46px] flex-1 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex h-[46px] flex-1 items-center justify-center gap-2 rounded-[10px] bg-[#BE2257] px-4 text-sm font-bold text-white shadow-md shadow-[#BE2257]/20 transition hover:bg-[#A11B48] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? (
                 <>
@@ -278,7 +266,7 @@ export default function SessionSummary() {
                   <span>Refleksi berhasil diperbarui! 🔥</span>
                 </>
               ) : (
-                <span>Simpan Refleksi & Kembali ke Dashboard</span>
+                <span>Simpan Refleksi &amp; Kembali ke Dashboard</span>
               )}
             </button>
             <button
@@ -287,7 +275,7 @@ export default function SessionSummary() {
               onClick={handleSkipReflection}
               className="flex h-[46px] items-center justify-center rounded-[10px] border border-[#DFE4F1] bg-white px-5 text-sm font-bold text-[#56638A] transition hover:bg-[#F6F7FC] hover:text-[#1D3668] disabled:opacity-50"
             >
-              Lewati & ke Dashboard
+              Lewati &amp; ke Dashboard
             </button>
           </div>
         </form>

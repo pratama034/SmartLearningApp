@@ -5,15 +5,20 @@ import {
   CloudCheck,
   LayoutDashboard,
   LogOut,
+  MessageSquareText,
   Settings,
   Timer,
   UserRound,
   UsersRound,
+  X,
   type LucideIcon,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { mockUsers } from '../lib/mockData'
+import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
+import { useGroupStore } from '../store/groupStore'
 import { useSessionStore } from '../store/sessionStore'
 
 const navigation: { label: string; to: string; icon: LucideIcon }[] = [
@@ -86,13 +91,13 @@ function Brand() {
     <div className="flex items-center gap-2.5">
       <img
         src="/logo.jpg"
-        alt="Logo Smart Focus Akademik"
-        className="h-9 w-9 rounded-xl object-contain shadow-xs border border-[#1D3668]/15"
+        alt="Logo StuFo (Study & Focus)"
+        className="h-9 w-9 rounded-xl object-cover shadow-xs border border-[#1D3668]/15"
       />
       <span className="flex flex-col">
-        <span className="text-sm font-extrabold leading-4 tracking-tight text-[#1D3668]">Smart Focus</span>
+        <span className="text-sm font-extrabold leading-4 tracking-tight text-[#1D3668]">StuFo</span>
         <span className="mt-0.5 text-[10px] font-bold uppercase leading-3 tracking-[0.08em] text-[#BE2257]">
-          Akademik
+          Study &amp; Focus
         </span>
       </span>
     </div>
@@ -134,11 +139,84 @@ export default function Layout() {
   const storeUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const currentUser = storeUser ?? mockUsers[0]
+  const [incomingChatPopup, setIncomingChatPopup] = useState<{
+    groupId: string
+    groupName: string
+    text: string
+  } | null>(null)
+
   const initials = currentUser.name
     .split(' ')
     .map((part) => part[0])
     .slice(0, 2)
     .join('')
+
+  useEffect(() => {
+    const uid = storeUser?.id
+    if (!uid) return
+
+    void useGroupStore.getState().fetchMyGroups(uid)
+
+    const globalChatChannel = supabase
+      .channel(`global-group-chat-notif:${uid}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'group_chat_messages' },
+        (payload) => {
+          const row = payload.new as {
+            group_id?: string
+            sender_id?: string
+            text?: string | null
+            file_name?: string | null
+          }
+          if (!row?.group_id || row.sender_id === uid) return
+
+          const { groups, isGroupMuted } = useGroupStore.getState()
+          const targetGroup = groups.find((g) => g.id === row.group_id)
+          if (!targetGroup) return
+          if (isGroupMuted(row.group_id)) return
+
+          const preview = row.text || (row.file_name ? `Lampiran: ${row.file_name}` : 'Pesan baru di grup')
+          setIncomingChatPopup({
+            groupId: row.group_id,
+            groupName: targetGroup.name,
+            text: preview,
+          })
+
+          try {
+            const AudioCtx =
+              window.AudioContext ||
+              (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+            if (AudioCtx) {
+              const ctx = new AudioCtx()
+              const osc = ctx.createOscillator()
+              const gain = ctx.createGain()
+              osc.type = 'sine'
+              osc.frequency.setValueAtTime(659.25, ctx.currentTime)
+              gain.gain.setValueAtTime(0.12, ctx.currentTime)
+              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16)
+              osc.connect(gain)
+              gain.connect(ctx.destination)
+              osc.start()
+              osc.stop(ctx.currentTime + 0.16)
+            }
+          } catch {
+            // ignore
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(globalChatChannel)
+    }
+  }, [storeUser?.id])
+
+  useEffect(() => {
+    if (!incomingChatPopup) return
+    const timer = window.setTimeout(() => setIncomingChatPopup(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [incomingChatPopup])
 
   async function handleSidebarLogout() {
     await logout()
@@ -186,7 +264,7 @@ export default function Layout() {
           <p className="truncate text-sm font-bold text-[#1F2C4F]">{currentUser.name}</p>
           <p className="mt-1 truncate text-xs text-[#56638A]">{currentUser.major || currentUser.program_studi}</p>
           <p className="mt-2.5 truncate text-[10px] font-semibold text-[#757780]">
-            {currentUser.university ? `${currentUser.university} · Smart Focus` : 'Mahasiswa · Smart Focus'}
+            {currentUser.university ? `${currentUser.university} · StuFo` : 'Mahasiswa · StuFo'}
           </p>
         </button>
         <button
@@ -214,6 +292,41 @@ export default function Layout() {
               {initials}
             </button>
           </div>
+          {incomingChatPopup && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#1D3668]/20 bg-[#1D3668] px-4 py-3 text-white shadow-lg"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  const gId = incomingChatPopup.groupId
+                  setIncomingChatPopup(null)
+                  navigate(`/group/${gId}`)
+                }}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/15 text-white">
+                  <MessageSquareText size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-extrabold text-[#9CC3FF]">
+                    Pesan Grup Baru · {incomingChatPopup.groupName}
+                  </p>
+                  <p className="truncate text-xs font-medium text-white">{incomingChatPopup.text}</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIncomingChatPopup(null)}
+                aria-label="Tutup notifikasi chat"
+                className="rounded-lg p-1 text-white/75 hover:bg-white/10 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
           <Outlet />
         </div>
       </main>
