@@ -22,36 +22,9 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { useGroupStore, type StudyGroupItem } from '../store/groupStore'
-import { useSessionStore } from '../store/sessionStore'
 
 export default function CoFocus() {
   const navigate = useNavigate()
-
-  // Session & Local settings
-  const [isSharing, setIsSharing] = useState(() => {
-    try {
-      return (
-        typeof window !== 'undefined' &&
-        window.localStorage.getItem('smartlearning-cofocus-sharing') !== 'false'
-      )
-    } catch {
-      return true
-    }
-  })
-  const [autoReply, setAutoReply] = useState(() => {
-    try {
-      return (
-        (typeof window !== 'undefined' &&
-          window.localStorage.getItem('smartlearning-cofocus-auto-reply')) ||
-        'Sedang fokus belajar modul Manajemen Inovasi. Balasan menyusul setelah sesi tuntas.'
-      )
-    } catch {
-      return 'Sedang fokus belajar modul Manajemen Inovasi. Balasan menyusul setelah sesi tuntas.'
-    }
-  })
-  const sessionStatus = useSessionStore((state) => state.status)
-  const ownStatus =
-    sessionStatus === 'running' || sessionStatus === 'paused' ? 'Sedang Fokus' : 'Tersedia'
 
   // Auth & User
   const user = useAuthStore((state) => state.user)
@@ -129,23 +102,6 @@ export default function CoFocus() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [copiedCode, setCopiedCode] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  // Sync settings to localStorage
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('smartlearning-cofocus-sharing', String(isSharing))
-    } catch {
-      // Ignore storage errors
-    }
-  }, [isSharing])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('smartlearning-cofocus-auto-reply', autoReply)
-    } catch {
-      // Ignore storage errors
-    }
-  }, [autoReply])
 
   // Auto-dismiss toast after 4 seconds
   useEffect(() => {
@@ -342,7 +298,7 @@ export default function CoFocus() {
         </div>
       )}
 
-      {/* Header & Status Card */}
+      {/* Header Card */}
       <section className="rounded-2xl border border-[#DFE4F1] bg-white p-5 shadow-[0_2px_4px_rgba(29,54,104,0.03),0_8px_16px_rgba(29,54,104,0.04)] sm:p-6">
         <div className="flex items-start gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#E1EAF8] text-[#1D3668]">
@@ -359,56 +315,6 @@ export default function CoFocus() {
               Pilih grup ruang belajarmu di bawah untuk membuka obrolan diskusi dan melihat daftar
               anggota yang sedang fokus.
             </p>
-          </div>
-        </div>
-
-        <div className="mt-6 space-y-5 border-t border-[#DFE4F1] pt-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <label htmlFor="share-focus-status" className="text-sm font-bold text-[#1F2C4F]">
-                Bagikan status saya
-              </label>
-              <p className="mt-1 text-[13px] leading-[18px] text-[#56638A]">
-                Status dibagikan:{' '}
-                <strong className="font-semibold text-[#1F2C4F]">
-                  {isSharing ? ownStatus : 'Tersembunyi'}
-                </strong>
-                .
-              </p>
-            </div>
-            <button
-              id="share-focus-status"
-              type="button"
-              role="switch"
-              aria-checked={isSharing}
-              onClick={() => setIsSharing((current) => !current)}
-              className={`relative inline-flex h-[26px] w-12 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#1D3668] focus:ring-offset-2 ${
-                isSharing ? 'bg-[#1D3668]' : 'bg-[#DFE4F1]'
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
-                  isSharing ? 'translate-x-[25px]' : 'translate-x-[3px]'
-                }`}
-              />
-            </button>
-          </div>
-
-          <div>
-            <label
-              htmlFor="cofocus-auto-reply"
-              className="mb-2 flex items-center gap-2 text-sm font-bold text-[#1F2C4F]"
-            >
-              <MessageSquareText size={17} aria-hidden="true" /> Pesan Balasan Otomatis
-            </label>
-            <input
-              id="cofocus-auto-reply"
-              type="text"
-              value={autoReply}
-              onChange={(event) => setAutoReply(event.target.value)}
-              className="h-11 w-full rounded-[10px] border border-[#DFE4F1] bg-[#F6F7FC] px-4 text-sm text-[#1F2C4F] outline-none transition placeholder:text-[#56638A] focus:border-[#1D3668] focus:bg-white focus:ring-2 focus:ring-[#1D3668]/20"
-            />
           </div>
         </div>
       </section>

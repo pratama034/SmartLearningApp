@@ -73,7 +73,7 @@ export default function App() {
         <div className="flex flex-col items-center rounded-2xl border border-[#DFE4F1] bg-white px-8 py-7 shadow-[0_8px_24px_rgba(29,54,104,0.08)]">
           <img
             src="/logo.jpg"
-            alt="Logo Smart Focus Akademik"
+            alt="Logo StuFo (Study & Focus)"
             className="h-14 w-14 rounded-2xl object-contain shadow-sm border border-[#1D3668]/15"
           />
           <Loader2
@@ -81,7 +81,7 @@ export default function App() {
             className="mt-4 animate-spin text-[#BE2257]"
             aria-hidden="true"
           />
-          <p className="mt-3 text-sm font-bold text-[#1F2C4F]">Memuat sesi Smart Focus...</p>
+          <p className="mt-3 text-sm font-bold text-[#1F2C4F]">Memuat sesi StuFo...</p>
           <p className="mt-1 text-xs text-[#56638A]">Menghubungkan ke layanan autentikasi</p>
         </div>
       </div>

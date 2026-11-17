@@ -270,6 +270,14 @@ export default function App() {
           ToastAndroid.SHORT
         );
       }
+
+      if (parsed.type === 'TIMER_COMPLETED_NOTIFICATION') {
+        const payloadData = parsed.data as { title?: string; body?: string } | undefined;
+        ToastAndroid.show(
+          payloadData?.body || 'Waktu fokus telah selesai!',
+          ToastAndroid.LONG
+        );
+      }
     } catch (err) {
       console.warn('[WebView Bridge] Gagal memproses pesan dari Web:', err);
     }

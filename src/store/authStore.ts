@@ -720,8 +720,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       try {
         window.localStorage.removeItem(STORAGE_KEY)
         window.localStorage.removeItem('smartlearning-session')
-        window.localStorage.removeItem('smartlearning-cofocus-sharing')
-        window.localStorage.removeItem('smartlearning-cofocus-auto-reply')
         window.localStorage.removeItem(ONBOARDING_KEY)
       } catch {
         // Abaikan error penghapusan localStorage
